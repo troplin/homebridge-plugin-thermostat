@@ -2,14 +2,17 @@ import {
   AccessoryConfig,
   AccessoryPlugin,
   API,
+  Characteristic,
   CharacteristicEventTypes,
   CharacteristicGetCallback,
+  CharacteristicProps,
   CharacteristicSetCallback,
   CharacteristicValue,
   HAP,
   Logging,
-  Service
-} from "homebridge";
+  Nullable,
+  Service,
+} from 'homebridge';
 
 /*
  * IMPORTANT NOTICE
@@ -40,39 +43,49 @@ let hap: HAP;
  */
 export = (api: API) => {
   hap = api.hap;
-  api.registerAccessory("ExampleSwitch", ExampleSwitch);
+  api.registerAccessory('AdvancedThermostat', AdvancedThermostat);
 };
 
-class ExampleSwitch implements AccessoryPlugin {
+class AdvancedThermostat implements AccessoryPlugin {
 
   private readonly log: Logging;
   private readonly name: string;
-  private switchOn = false;
 
-  private readonly switchService: Service;
+  private readonly mainService: Service;
   private readonly informationService: Service;
+
+  private mode: CharacteristicValue;
+  private targetTemperature: CharacteristicValue;
 
   constructor(log: Logging, config: AccessoryConfig, api: API) {
     this.log = log;
     this.name = config.name;
 
-    this.switchService = new hap.Service.Switch(this.name);
-    this.switchService.getCharacteristic(hap.Characteristic.On)
-      .on(CharacteristicEventTypes.GET, (callback: CharacteristicGetCallback) => {
-        log.info("Current state of the switch was returned: " + (this.switchOn? "ON": "OFF"));
-        callback(undefined, this.switchOn);
-      })
-      .on(CharacteristicEventTypes.SET, (value: CharacteristicValue, callback: CharacteristicSetCallback) => {
-        this.switchOn = value as boolean;
-        log.info("Switch state was set to: " + (this.switchOn? "ON": "OFF"));
-        callback();
-      });
+    this.mode = hap.Characteristic.TargetHeatingCoolingState.HEAT;
+    this.targetTemperature = 20;
 
+    // create main service
+    this.mainService = new hap.Service.Thermostat(this.name);
+
+    this.mainService.getCharacteristic(hap.Characteristic.TargetHeatingCoolingState)
+      .onGet(this.getMode.bind(this))
+      .onSet(this.setMode.bind(this));
+
+    this.mainService.getCharacteristic(hap.Characteristic.TargetTemperature)
+      .onGet(this.getTargetTemperature.bind(this))
+      .onSet(this.setTargetTemperature.bind(this));
+
+    this.mainService.getCharacteristic(hap.Characteristic.HeatingThresholdTemperature)
+      .onSet(this.setCurrentTemperature.bind(this));
+
+    this.setCurrentTemperature(20);
+
+    // create information service
     this.informationService = new hap.Service.AccessoryInformation()
-      .setCharacteristic(hap.Characteristic.Manufacturer, "Custom Manufacturer")
-      .setCharacteristic(hap.Characteristic.Model, "Custom Model");
+      .setCharacteristic(hap.Characteristic.Manufacturer, 'Custom Manufacturer')
+      .setCharacteristic(hap.Characteristic.Model, 'Custom Model');
 
-    log.info("Switch finished initializing!");
+    this.log.debug('Advanced thermostat finished initializing!');
   }
 
   /*
@@ -80,7 +93,7 @@ class ExampleSwitch implements AccessoryPlugin {
    * Typical this only ever happens at the pairing process.
    */
   identify(): void {
-    this.log("Identify!");
+    this.log.debug('Identify!');
   }
 
   /*
@@ -90,8 +103,81 @@ class ExampleSwitch implements AccessoryPlugin {
   getServices(): Service[] {
     return [
       this.informationService,
-      this.switchService,
+      this.mainService,
     ];
   }
 
+  /**
+   * Handle requests to get the current value of the "Current Heating Cooling State" characteristic
+   */
+  updateState() : void {
+    const currentTemperature = this.getCurrentTemperature();
+    let state = hap.Characteristic.CurrentHeatingCoolingState.OFF;
+    if (currentTemperature !== null) {
+      if (currentTemperature < this.targetTemperature) {
+        if (this.mode === hap.Characteristic.TargetHeatingCoolingState.HEAT ||
+            this.mode === hap.Characteristic.TargetHeatingCoolingState.AUTO) {
+          state = hap.Characteristic.CurrentHeatingCoolingState.HEAT;
+        }
+      } else if (currentTemperature > this.targetTemperature) {
+        if (this.mode === hap.Characteristic.TargetHeatingCoolingState.COOL ||
+            this.mode === hap.Characteristic.TargetHeatingCoolingState.AUTO) {
+          state = hap.Characteristic.CurrentHeatingCoolingState.COOL;
+        }
+      }
+    }
+    this.log.debug('Set state: ' + state);
+    this.mainService.updateCharacteristic(hap.Characteristic.CurrentHeatingCoolingState, state);
+  }
+
+  /**
+   * Handle requests to get the current value of the "Target Heating Cooling State" characteristic
+   */
+  getMode() : CharacteristicValue {
+    this.log.debug('Get mode: ' + this.mode);
+    return this.mode;
+  }
+
+  /**
+   * Handle requests to set the "Target Heating Cooling State" characteristic
+   */
+  setMode(value: CharacteristicValue) {
+    this.log.debug('Set mode: ' + value);
+    this.mode = value;
+    this.updateState();
+  }
+
+  /**
+   * Handle requests to get the current value of the "Target Temperature" characteristic
+   */
+  getTargetTemperature() : CharacteristicValue {
+    this.log.debug('Get target temperature: ' + this.targetTemperature);
+    return this.targetTemperature;
+  }
+
+  /**
+   * Handle requests to set the "Target Temperature" characteristic
+   */
+  setTargetTemperature(value: CharacteristicValue) {
+    this.log.debug('Set target temperature: ' + value);
+    this.targetTemperature = value;
+    this.updateState();
+  }
+
+  getCurrentTemperature() : Nullable<CharacteristicValue> {
+    const currentTemperature = this.mainService.getCharacteristic(hap.Characteristic.CurrentTemperature).value;
+    this.log.debug('Get current temperature: ' + currentTemperature);
+    return currentTemperature;
+  }
+
+  /**
+   * Handle requests to set the "Target Temperature" characteristic
+   */
+  setCurrentTemperature(value: CharacteristicValue) {
+    this.log.debug('Set current temperature: ' + value);
+    this.mainService.updateCharacteristic(hap.Characteristic.CurrentTemperature, value);
+    this.mainService.updateCharacteristic(hap.Characteristic.HeatingThresholdTemperature, value);
+
+    this.updateState();
+  }
 }
