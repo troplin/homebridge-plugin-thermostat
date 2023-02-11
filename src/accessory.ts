@@ -96,6 +96,7 @@ class AdvancedThermostat implements AccessoryPlugin {
       .onSet(this.setMode.bind(this));
 
     this.thermostat.getCharacteristic(hap.Characteristic.TargetTemperature)
+      .setProps({ minValue: 10, maxValue: 30})
       .onGet(this.getTargetTemperature.bind(this))
       .onSet(this.setTargetTemperature.bind(this));
 
@@ -105,10 +106,13 @@ class AdvancedThermostat implements AccessoryPlugin {
     // create trigger service
     this.trigger = new hap.Service.StatelessProgrammableSwitch();
 
+    this.trigger.getCharacteristic(hap.Characteristic.ProgrammableSwitchEvent)
+      .setProps({ validValues: [hap.Characteristic.ProgrammableSwitchEvent.SINGLE_PRESS] });
+
     // Initialize
-    this.triggerCurrentTemperatureUpdate();
-    setInterval(this.runInterval.bind(this), this.interval * 60000);
+    setTimeout(this.triggerCurrentTemperatureUpdate.bind(this));
     setTimeout(this.runInterval.bind(this), 10000);
+    setInterval(this.runInterval.bind(this), this.interval * 60000);
 
     this.log.debug('Advanced thermostat finished initializing!');
   }
