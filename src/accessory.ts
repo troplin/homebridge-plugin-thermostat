@@ -50,8 +50,9 @@ class AdvancedThermostat implements AccessoryPlugin {
 
   private readonly log: Logging;
 
-  private readonly mainService: Service;
-  private readonly informationService: Service;
+  private readonly thermostat: Service;
+  private readonly trigger: Service;
+  private readonly information: Service;
 
   // Configuration
   private readonly name: string;
@@ -82,28 +83,32 @@ class AdvancedThermostat implements AccessoryPlugin {
     this.mode = this.Mode.HEAT;
     this.targetTemperature = 20;
 
-    // create main service
-    this.mainService = new hap.Service.Thermostat(this.name);
-
-    this.mainService.getCharacteristic(this.Mode)
-      .onGet(this.getMode.bind(this))
-      .onSet(this.setMode.bind(this));
-
-    this.mainService.getCharacteristic(hap.Characteristic.TargetTemperature)
-      .onGet(this.getTargetTemperature.bind(this))
-      .onSet(this.setTargetTemperature.bind(this));
-
-    this.mainService.getCharacteristic(hap.Characteristic.HeatingThresholdTemperature)
-      .onSet(this.setCurrentTemperature.bind(this));
-
-    this.setCurrentTemperature(20);
-
     // create information service
-    this.informationService = new hap.Service.AccessoryInformation()
+    this.information = new hap.Service.AccessoryInformation()
       .setCharacteristic(hap.Characteristic.Manufacturer, 'Custom Manufacturer')
       .setCharacteristic(hap.Characteristic.Model, 'Custom Model');
 
+    // create thermostat service
+    this.thermostat = new hap.Service.Thermostat(this.name);
+
+    this.thermostat.getCharacteristic(this.Mode)
+      .onGet(this.getMode.bind(this))
+      .onSet(this.setMode.bind(this));
+
+    this.thermostat.getCharacteristic(hap.Characteristic.TargetTemperature)
+      .onGet(this.getTargetTemperature.bind(this))
+      .onSet(this.setTargetTemperature.bind(this));
+
+    this.thermostat.getCharacteristic(hap.Characteristic.HeatingThresholdTemperature)
+      .onSet(this.setCurrentTemperature.bind(this));
+
+    // create trigger service
+    this.trigger = new hap.Service.StatelessProgrammableSwitch();
+
+    // Initialize
+    this.triggerCurrentTemperatureUpdate();
     setInterval(this.runInterval.bind(this), this.interval * 60000);
+    setTimeout(this.runInterval.bind(this), 10000);
 
     this.log.debug('Advanced thermostat finished initializing!');
   }
@@ -122,8 +127,9 @@ class AdvancedThermostat implements AccessoryPlugin {
    */
   getServices(): Service[] {
     return [
-      this.informationService,
-      this.mainService,
+      this.information,
+      this.thermostat,
+      this.trigger,
     ];
   }
 
@@ -158,7 +164,7 @@ class AdvancedThermostat implements AccessoryPlugin {
   }
 
   getCurrentTemperature() : Nullable<CharacteristicValue> {
-    const currentTemperature = this.mainService.getCharacteristic(hap.Characteristic.CurrentTemperature).value;
+    const currentTemperature = this.thermostat.getCharacteristic(hap.Characteristic.CurrentTemperature).value;
     return currentTemperature;
   }
 
@@ -167,8 +173,8 @@ class AdvancedThermostat implements AccessoryPlugin {
    */
   setCurrentTemperature(value: CharacteristicValue) {
     this.log.debug('Current temperature: ' + (value as number).toFixed(1));
-    this.mainService.updateCharacteristic(hap.Characteristic.CurrentTemperature, value);
-    this.mainService.updateCharacteristic(hap.Characteristic.HeatingThresholdTemperature, value);
+    this.thermostat.updateCharacteristic(hap.Characteristic.CurrentTemperature, value);
+    this.thermostat.updateCharacteristic(hap.Characteristic.HeatingThresholdTemperature, value);
   }
 
   runInterval() {
@@ -206,25 +212,33 @@ class AdvancedThermostat implements AccessoryPlugin {
     // Execute
     if (onMinutes === 0) {
       this.log.debug('Action: OFF for ' + offMinutes + ' min.');
-      this.mainService.updateCharacteristic(this.State, this.State.OFF);
+      this.thermostat.updateCharacteristic(this.State, this.State.OFF);
     } else if (offMinutes === 0) {
       this.log.debug('Action: ' + onAction + ' for ' + onMinutes + ' min.');
-      this.mainService.updateCharacteristic(this.State, onState);
+      this.thermostat.updateCharacteristic(this.State, onState);
     } else {
-      const currentState = this.mainService.getCharacteristic(this.State).value;
+      const currentState = this.thermostat.getCharacteristic(this.State).value;
       if (currentState === onState) {
         this.log.debug('Action: ' + onAction + ' for ' + onMinutes + ' min, then OFF for ' + offMinutes + ' min.');
-        this.mainService.updateCharacteristic(this.State, onState);
+        this.thermostat.updateCharacteristic(this.State, onState);
         setTimeout(() => {
-          this.mainService.updateCharacteristic(this.State, this.State.OFF);
+          this.thermostat.updateCharacteristic(this.State, this.State.OFF);
         }, onMinutes * 60000);
       } else {
         this.log.debug('Action: OFF for ' + offMinutes + ' min, then ' + onAction + ' for ' + onMinutes + ' min.');
-        this.mainService.updateCharacteristic(this.State, this.State.OFF);
+        this.thermostat.updateCharacteristic(this.State, this.State.OFF);
         setTimeout(() => {
-          this.mainService.updateCharacteristic(this.State, onState);
+          this.thermostat.updateCharacteristic(this.State, onState);
         }, offMinutes * 60000);
       }
     }
+
+    // Set trigger for temperature update 10s before next interval
+    setTimeout(this.triggerCurrentTemperatureUpdate.bind(this), this.interval * 60000 - 10000);
+  }
+
+  triggerCurrentTemperatureUpdate(): void {
+    this.trigger.getCharacteristic(hap.Characteristic.ProgrammableSwitchEvent)
+      .sendEventNotification(hap.Characteristic.ProgrammableSwitchEvent.SINGLE_PRESS);
   }
 }
