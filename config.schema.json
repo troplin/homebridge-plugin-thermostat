@@ -1,0 +1,49 @@
+{
+    "pluginAlias": "AdvancedThermostat",
+    "pluginType": "accessory",
+    "singular": false,
+    "schema": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "title": "Name",
+          "type": "string",
+          "required": true
+        },
+        "interval": {
+          "title": "Interval",
+          "description": "Interval, in minutes",
+          "type": "number",
+          "default": 10,
+          "required": true
+        },
+        "pid": {
+          "title": "PID Control",
+          "type": "object",
+          "properties": {
+            "cP": {
+              "title": "P",
+              "description": "Proportional coefficient",
+              "type": "number",
+              "default": 0.2,
+              "required": true
+            },
+            "cI": {
+              "title": "I",
+              "description": "Integral coefficient",
+              "type": "number",
+              "default": 0.01,
+              "required": true
+            },
+            "cD": {
+              "title": "D",
+              "description": "Differential coefficient",
+              "type": "number",
+              "default": 0.2,
+              "required": true
+            }
+          }
+        }
+      }
+    }
+  }

@@ -2,11 +2,6 @@ import {
   AccessoryConfig,
   AccessoryPlugin,
   API,
-  Characteristic,
-  CharacteristicEventTypes,
-  CharacteristicGetCallback,
-  CharacteristicProps,
-  CharacteristicSetCallback,
   CharacteristicValue,
   HAP,
   Logging,
@@ -17,7 +12,8 @@ import {
 /*
  * IMPORTANT NOTICE
  *
- * One thing you need to take care of is, that you never ever ever import anything directly from the "homebridge" module (or the "hap-nodejs" module).
+ * One thing you need to take care of is,
+ * that you never ever ever import anything directly from the "homebridge" module (or the "hap-nodejs" module).
  * The above import block may seem like, that we do exactly that, but actually those imports are only used for types and interfaces
  * and will disappear once the code is compiled to Javascript.
  * In fact you can check that by running `npm run build` and opening the compiled Javascript file in the `dist` folder.
@@ -53,27 +49,36 @@ class AdvancedThermostat implements AccessoryPlugin {
   private readonly State = hap.Characteristic.CurrentHeatingCoolingState;
 
   private readonly log: Logging;
-  private readonly name: string;
 
   private readonly mainService: Service;
   private readonly informationService: Service;
 
   // Configuration
+  private readonly name: string;
+  private readonly interval: number;
+  private readonly cP: number;
+  private readonly cI: number;
+  private readonly cD: number;
+
+  // External state
   private mode: CharacteristicValue;
   private targetTemperature: CharacteristicValue;
-  private interval = 5;
-  private cP = 0.2;
-  private cI = 0.01;
-  private cD = 0.1;
 
-  // State
+  // Internal state
   private lastError = 0;
   private integralError = 0;
 
-  constructor(log: Logging, config: AccessoryConfig, api: API) {
+  constructor(log: Logging, config: AccessoryConfig, _api: API) {
     this.log = log;
-    this.name = config.name;
 
+    // Configuration
+    this.name = config.name;
+    this.interval = config.interval;
+    this.cP = config.pid.cP;
+    this.cI = config.pid.cI;
+    this.cD = config.pid.cD;
+
+    // External state
     this.mode = this.Mode.HEAT;
     this.targetTemperature = 20;
 
@@ -101,8 +106,6 @@ class AdvancedThermostat implements AccessoryPlugin {
     setInterval(this.runInterval.bind(this), this.interval * 60000);
 
     this.log.debug('Advanced thermostat finished initializing!');
-
-    this.runInterval();
   }
 
   /*
@@ -186,7 +189,7 @@ class AdvancedThermostat implements AccessoryPlugin {
 
     // Control equation
     const controlFactor = proportionalError + this.integralError + differentialError;
-    this.log.debug('Control factor: ' + controlFactor +
+    this.log.info('Control factor: ' + controlFactor +
       ' (P: ' + proportionalError +
       ', I: ' + this.integralError +
       ', D: ' + differentialError + ')');
@@ -205,21 +208,21 @@ class AdvancedThermostat implements AccessoryPlugin {
 
     // Execute
     if (onMinutes === 0) {
-      this.log.debug('Action: OFF for ' + offMinutes + ' min.');
+      this.log.info('Action: OFF for ' + offMinutes + ' min.');
       this.mainService.updateCharacteristic(this.State, this.State.OFF);
     } else if (offMinutes === 0) {
-      this.log.debug('Action: ' + onAction + ' for ' + onMinutes + ' min.');
+      this.log.info('Action: ' + onAction + ' for ' + onMinutes + ' min.');
       this.mainService.updateCharacteristic(this.State, onState);
     } else {
       const currentState = this.mainService.getCharacteristic(this.State).value;
       if (currentState === onState) {
-        this.log.debug('Action: ' + onAction + ' for ' + onMinutes + ' min, then OFF for ' + offMinutes + ' min.');
+        this.log.info('Action: ' + onAction + ' for ' + onMinutes + ' min, then OFF for ' + offMinutes + ' min.');
         this.mainService.updateCharacteristic(this.State, onState);
         setTimeout(() => {
           this.mainService.updateCharacteristic(this.State, this.State.OFF);
         }, onMinutes * 60000);
       } else {
-        this.log.debug('Action: OFF for ' + offMinutes + ' min, then ' + onAction + ' for ' + onMinutes + ' min.');
+        this.log.info('Action: OFF for ' + offMinutes + ' min, then ' + onAction + ' for ' + onMinutes + ' min.');
         this.mainService.updateCharacteristic(this.State, this.State.OFF);
         setTimeout(() => {
           this.mainService.updateCharacteristic(this.State, onState);
