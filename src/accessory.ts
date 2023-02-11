@@ -3,14 +3,15 @@ import {
   AccessoryConfig,
   AccessoryPlugin,
   API,
+  Characteristic,
   CharacteristicValue,
   HAP,
   Logging,
   Nullable,
+  Perms,
   Service,
 } from 'homebridge';
-import path, { join } from 'path';
-import { compare } from 'semver';
+import path from 'path';
 
 /*
  * IMPORTANT NOTICE
@@ -51,11 +52,9 @@ class AdvancedThermostat implements AccessoryPlugin {
   private readonly Mode = hap.Characteristic.TargetHeatingCoolingState;
   private readonly State = hap.Characteristic.CurrentHeatingCoolingState;
 
+  // Internal
   private readonly log: Logging;
-
-  private readonly thermostat: Service;
-  private readonly trigger: Service;
-  private readonly information: Service;
+  private readonly persistPath: string;
 
   // Configuration
   private readonly name: string;
@@ -64,15 +63,19 @@ class AdvancedThermostat implements AccessoryPlugin {
   private readonly cI: number;
   private readonly cD: number;
 
-  private readonly persistPath: string;
+  // Services
+  private readonly thermostat: Service;
+  private readonly trigger: Service;
+  private readonly information: Service;
 
-  // External state
-  private mode: CharacteristicValue;
-  private targetTemperature: CharacteristicValue;
+  // Characteristics
+  private readonly mode: Characteristic;
+  private readonly targetTemperature: Characteristic;
+  private readonly currentTemperature: Characteristic;
 
   // Internal state
   private lastError?: number;
-  private integralError = 0;
+  private accumulatedError = 50;
 
   constructor(log: Logging, config: AccessoryConfig, api: API) {
     this.log = log;
@@ -87,11 +90,6 @@ class AdvancedThermostat implements AccessoryPlugin {
     const uuid = api.hap.uuid.generate(config.name);
     this.persistPath = path.join(api.user.persistPath(), `${config.accessory}.${uuid}.json`);
 
-    // External state
-    this.mode = this.Mode.OFF;
-    this.targetTemperature = 20;
-    this.loadState();
-
     // create information service
     this.information = new hap.Service.AccessoryInformation()
       .setCharacteristic(hap.Characteristic.Manufacturer, 'Custom Manufacturer')
@@ -100,14 +98,13 @@ class AdvancedThermostat implements AccessoryPlugin {
     // create thermostat service
     this.thermostat = new hap.Service.Thermostat(this.name);
 
-    this.thermostat.getCharacteristic(this.Mode)
-      .onGet(this.getMode.bind(this))
-      .onSet(this.setMode.bind(this));
+    this.mode = this.thermostat.getCharacteristic(this.Mode);
 
-    this.thermostat.getCharacteristic(hap.Characteristic.TargetTemperature)
-      .setProps({ minValue: 10, maxValue: 30})
-      .onGet(this.getTargetTemperature.bind(this))
-      .onSet(this.setTargetTemperature.bind(this));
+    this.targetTemperature = this.thermostat.getCharacteristic(hap.Characteristic.TargetTemperature)
+      .setProps({ minValue: 10, maxValue: 30});
+
+    this.currentTemperature = this.thermostat.getCharacteristic(hap.Characteristic.CurrentTemperature);
+    this.currentTemperature.setProps({ perms: this.currentTemperature.props.perms.concat(Perms.PAIRED_WRITE) });
 
     this.thermostat.getCharacteristic(hap.Characteristic.HeatingThresholdTemperature)
       .onSet(this.setCurrentTemperature.bind(this));
@@ -117,6 +114,9 @@ class AdvancedThermostat implements AccessoryPlugin {
 
     this.trigger.getCharacteristic(hap.Characteristic.ProgrammableSwitchEvent)
       .setProps({ validValues: [hap.Characteristic.ProgrammableSwitchEvent.SINGLE_PRESS] });
+
+    // State
+    this.loadState();
 
     // Initialize
     setTimeout(this.triggerCurrentTemperatureUpdate.bind(this), 10000);
@@ -131,11 +131,15 @@ class AdvancedThermostat implements AccessoryPlugin {
   }
 
   private loadState(): void {
+    let persistedState: { mode: CharacteristicValue; targetTemperature: CharacteristicValue; accumulatedError: number } | undefined;
     if (existsSync(this.persistPath)) {
       const rawFile = readFileSync(this.persistPath, 'utf8');
-      const persistedState = JSON.parse(rawFile);
-      this.mode = persistedState.mode ?? this.mode;
-      this.targetTemperature = persistedState.targetTemperature ?? this.targetTemperature;
+      persistedState = JSON.parse(rawFile);
+    }
+    this.mode.updateValue(persistedState?.mode ?? this.Mode.OFF);
+    this.targetTemperature.updateValue(persistedState?.targetTemperature ?? 20);
+    this.accumulatedError = persistedState?.accumulatedError ?? this.accumulatedError;
+    if (persistedState !== undefined) {
       this.log.debug('State loaded from: ' + this.persistPath);
     }
   }
@@ -144,8 +148,9 @@ class AdvancedThermostat implements AccessoryPlugin {
     writeFileSync(
       this.persistPath,
       JSON.stringify({
-        mode: this.mode,
-        targetTemperature: this.targetTemperature,
+        mode: this.mode.value,
+        targetTemperature: this.targetTemperature.value,
+        integralError: this.accumulatedError,
       }),
     );
     this.log.debug('State saved to: ' + this.persistPath);
@@ -171,38 +176,8 @@ class AdvancedThermostat implements AccessoryPlugin {
     ];
   }
 
-  /**
-   * Handle requests to get the current value of the "Target Heating Cooling State" characteristic
-   */
-  getMode() : CharacteristicValue {
-    return this.mode;
-  }
-
-  /**
-   * Handle requests to set the "Target Heating Cooling State" characteristic
-   */
-  setMode(value: CharacteristicValue) {
-    this.log.debug('Set mode: ' + value);
-    this.mode = value;
-  }
-
-  /**
-   * Handle requests to get the current value of the "Target Temperature" characteristic
-   */
-  getTargetTemperature() : CharacteristicValue {
-    return this.targetTemperature;
-  }
-
-  /**
-   * Handle requests to set the "Target Temperature" characteristic
-   */
-  setTargetTemperature(value: CharacteristicValue) {
-    this.log.debug('Set target temperature: ' + value);
-    this.targetTemperature = value;
-  }
-
   getCurrentTemperature() : Nullable<CharacteristicValue> {
-    const currentTemperature = this.thermostat.getCharacteristic(hap.Characteristic.CurrentTemperature).value;
+    const currentTemperature = this.currentTemperature.value;
     return currentTemperature;
   }
 
@@ -230,28 +205,28 @@ class AdvancedThermostat implements AccessoryPlugin {
 
   runInterval() {
     // P
-    const currentTemperature = this.getCurrentTemperature() ?? this.targetTemperature;
-    const error = this.targetTemperature as number - (currentTemperature as number);
-    const proportionalError = this.cP * error;
+    const currentTemperature = (this.currentTemperature.value ?? this.targetTemperature.value) as number;
+    const error = this.targetTemperature.value as number - currentTemperature;
+    const proportionalFactor = this.cP * error;
 
     // I
-    this.integralError = Math.max(Math.min(this.integralError + this.cI * error * this.interval, 1), -1);
+    this.accumulatedError = Math.max(Math.min(this.accumulatedError + error * this.interval, 100), -100);
+    const integralFactor = this.cI * this.accumulatedError;
 
     // D
-    const differentialError = this.cD * (error - (this.lastError ?? error)) / this.interval;
+    const differentialError = (error - (this.lastError ?? error)) / this.interval;
     this.lastError = error;
+    const differentialFactor = this.cD * differentialError;
 
     // Control equation
-    const controlFactor = proportionalError + this.integralError + differentialError;
-
-    // Limit control factor according to mode
-    const maxControlFactor = (this.mode === this.Mode.HEAT) || (this.mode === this.Mode.AUTO) ? 1 : 0;
-    const minControlFactor = (this.mode === this.Mode.COOL) || (this.mode === this.Mode.AUTO) ? -1 : 0;
+    const controlFactor = proportionalFactor + integralFactor + differentialFactor;
+    const maxControlFactor = (this.mode.value === this.Mode.HEAT) || (this.mode.value === this.Mode.AUTO) ? 1 : 0;
+    const minControlFactor = (this.mode.value === this.Mode.COOL) || (this.mode.value === this.Mode.AUTO) ? -1 : 0;
     const controlFactorLimited = Math.max(Math.min(controlFactor, maxControlFactor), minControlFactor);
     this.log.debug('PID: ' + controlFactor.toFixed(2) +
-      ' (P: ' + proportionalError.toFixed(3) +
-      ', I: ' + this.integralError.toFixed(3) +
-      ', D: ' + differentialError.toFixed(3) +
+      ' (P: ' + proportionalFactor.toFixed(3) +
+      ', I: ' + integralFactor.toFixed(3) +
+      ', D: ' + differentialFactor.toFixed(3) +
       '), Limited: ' + controlFactorLimited.toFixed(2));
 
     // Determine action
