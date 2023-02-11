@@ -75,7 +75,7 @@ class AdvancedThermostat implements AccessoryPlugin {
 
   // Internal state
   private lastError?: number;
-  private accumulatedError = 50;
+  private accumulatedError = 0;
 
   constructor(log: Logging, config: AccessoryConfig, api: API) {
     this.log = log;
@@ -150,7 +150,7 @@ class AdvancedThermostat implements AccessoryPlugin {
       JSON.stringify({
         mode: this.mode.value,
         targetTemperature: this.targetTemperature.value,
-        integralError: this.accumulatedError,
+        accumulatedError: this.accumulatedError,
       }),
     );
     this.log.debug('State saved to: ' + this.persistPath);
@@ -236,7 +236,7 @@ class AdvancedThermostat implements AccessoryPlugin {
       duration: Math.round(Math.abs(controlFactorLimited) * this.interval),
     }, {
       state: this.State.OFF,
-      duration: Math.round((1 - Math.abs(controlFactorLimited)) * this.interval),
+      duration: (1 - Math.round(Math.abs(controlFactorLimited))) * this.interval,
     } ].filter(a => a.duration > 0)
       .sort((a1, a2) => a1.state === state.value ||
                         a2.state !== state.value && a1.state < a2.state ? -1 : 1);
