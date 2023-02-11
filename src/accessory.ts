@@ -236,7 +236,7 @@ class AdvancedThermostat implements AccessoryPlugin {
       duration: Math.round(Math.abs(controlFactorLimited) * this.interval),
     }, {
       state: this.State.OFF,
-      duration: (1 - Math.round(Math.abs(controlFactorLimited))) * this.interval,
+      duration: this.interval - Math.round(Math.abs(controlFactorLimited) * this.interval),
     } ].filter(a => a.duration > 0)
       .sort((a1, a2) => a1.state === state.value ||
                         a2.state !== state.value && a1.state < a2.state ? -1 : 1);
