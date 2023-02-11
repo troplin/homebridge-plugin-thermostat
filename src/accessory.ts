@@ -131,7 +131,6 @@ class AdvancedThermostat implements AccessoryPlugin {
    * Handle requests to get the current value of the "Target Heating Cooling State" characteristic
    */
   getMode() : CharacteristicValue {
-    this.log.debug('Get mode: ' + this.mode);
     return this.mode;
   }
 
@@ -147,7 +146,6 @@ class AdvancedThermostat implements AccessoryPlugin {
    * Handle requests to get the current value of the "Target Temperature" characteristic
    */
   getTargetTemperature() : CharacteristicValue {
-    this.log.debug('Get target temperature: ' + this.targetTemperature);
     return this.targetTemperature;
   }
 
@@ -161,7 +159,6 @@ class AdvancedThermostat implements AccessoryPlugin {
 
   getCurrentTemperature() : Nullable<CharacteristicValue> {
     const currentTemperature = this.mainService.getCharacteristic(hap.Characteristic.CurrentTemperature).value;
-    this.log.debug('Get current temperature: ' + currentTemperature);
     return currentTemperature;
   }
 
@@ -169,7 +166,7 @@ class AdvancedThermostat implements AccessoryPlugin {
    * Handle requests to set the "Target Temperature" characteristic
    */
   setCurrentTemperature(value: CharacteristicValue) {
-    this.log.debug('Set current temperature: ' + value);
+    this.log.debug('Current temperature: ' + (value as number).toFixed(1));
     this.mainService.updateCharacteristic(hap.Characteristic.CurrentTemperature, value);
     this.mainService.updateCharacteristic(hap.Characteristic.HeatingThresholdTemperature, value);
   }
@@ -189,16 +186,16 @@ class AdvancedThermostat implements AccessoryPlugin {
 
     // Control equation
     const controlFactor = proportionalError + this.integralError + differentialError;
-    this.log.info('Control factor: ' + controlFactor +
-      ' (P: ' + proportionalError +
-      ', I: ' + this.integralError +
-      ', D: ' + differentialError + ')');
 
     // Limit control factor according to mode
     const maxControlFactor = (this.mode === this.Mode.HEAT) || (this.mode === this.Mode.AUTO) ? 1 : 0;
     const minControlFactor = (this.mode === this.Mode.COOL) || (this.mode === this.Mode.AUTO) ? -1 : 0;
     const controlFactorLimited = Math.max(Math.min(controlFactor, maxControlFactor), minControlFactor);
-    this.log.debug('Limited control factor: ' + controlFactorLimited + ' (Min: ' + minControlFactor + ', Max: ' + maxControlFactor + ')');
+    this.log.debug('PID: ' + controlFactor.toFixed(2) +
+      ' (P: ' + proportionalError.toFixed(3) +
+      ', I: ' + this.integralError.toFixed(3) +
+      ', D: ' + differentialError.toFixed(3) +
+      '), Limited: ' + controlFactorLimited.toFixed(2));
 
     // Determine action
     const onMinutes = Math.round(Math.abs(controlFactorLimited) * this.interval);
@@ -208,21 +205,21 @@ class AdvancedThermostat implements AccessoryPlugin {
 
     // Execute
     if (onMinutes === 0) {
-      this.log.info('Action: OFF for ' + offMinutes + ' min.');
+      this.log.debug('Action: OFF for ' + offMinutes + ' min.');
       this.mainService.updateCharacteristic(this.State, this.State.OFF);
     } else if (offMinutes === 0) {
-      this.log.info('Action: ' + onAction + ' for ' + onMinutes + ' min.');
+      this.log.debug('Action: ' + onAction + ' for ' + onMinutes + ' min.');
       this.mainService.updateCharacteristic(this.State, onState);
     } else {
       const currentState = this.mainService.getCharacteristic(this.State).value;
       if (currentState === onState) {
-        this.log.info('Action: ' + onAction + ' for ' + onMinutes + ' min, then OFF for ' + offMinutes + ' min.');
+        this.log.debug('Action: ' + onAction + ' for ' + onMinutes + ' min, then OFF for ' + offMinutes + ' min.');
         this.mainService.updateCharacteristic(this.State, onState);
         setTimeout(() => {
           this.mainService.updateCharacteristic(this.State, this.State.OFF);
         }, onMinutes * 60000);
       } else {
-        this.log.info('Action: OFF for ' + offMinutes + ' min, then ' + onAction + ' for ' + onMinutes + ' min.');
+        this.log.debug('Action: OFF for ' + offMinutes + ' min, then ' + onAction + ' for ' + onMinutes + ' min.');
         this.mainService.updateCharacteristic(this.State, this.State.OFF);
         setTimeout(() => {
           this.mainService.updateCharacteristic(this.State, onState);

@@ -39,7 +39,7 @@
               "title": "D",
               "description": "Differential coefficient",
               "type": "number",
-              "default": 0.2,
+              "default": 1,
               "required": true
             }
           }
