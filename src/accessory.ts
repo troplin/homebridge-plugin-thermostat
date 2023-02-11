@@ -119,8 +119,10 @@ class AdvancedThermostat implements AccessoryPlugin {
 
     // Initialize
     setTimeout(this.triggerCurrentTemperatureUpdate.bind(this), 10000);
-    setTimeout(this.runInterval.bind(this), 20000);
-    setInterval(this.runInterval.bind(this), this.interval * 60000);
+    setTimeout(() => {
+      setTimeout(this.runInterval.bind(this));
+      setInterval(this.runInterval.bind(this), this.interval * 60000);
+    }, 20000);
 
     api.on('shutdown', this.saveState.bind(this));
 
