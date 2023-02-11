@@ -1,3 +1,4 @@
+import { existsSync, readFileSync, writeFileSync } from 'fs';
 import {
   AccessoryConfig,
   AccessoryPlugin,
@@ -8,6 +9,7 @@ import {
   Nullable,
   Service,
 } from 'homebridge';
+import path from 'path';
 
 /*
  * IMPORTANT NOTICE
@@ -61,15 +63,17 @@ class AdvancedThermostat implements AccessoryPlugin {
   private readonly cI: number;
   private readonly cD: number;
 
+  private readonly persistPath: string;
+
   // External state
   private mode: CharacteristicValue;
   private targetTemperature: CharacteristicValue;
 
   // Internal state
-  private lastError = 0;
+  private lastError?: number;
   private integralError = 0;
 
-  constructor(log: Logging, config: AccessoryConfig, _api: API) {
+  constructor(log: Logging, config: AccessoryConfig, api: API) {
     this.log = log;
 
     // Configuration
@@ -79,9 +83,13 @@ class AdvancedThermostat implements AccessoryPlugin {
     this.cI = config.pid.cI;
     this.cD = config.pid.cD;
 
+    const uuid = api.hap.uuid.generate(config.name);
+    this.persistPath = path.join(api.user.persistPath(), `${config.accessory}.${uuid}.json`);
+
     // External state
-    this.mode = this.Mode.HEAT;
+    this.mode = this.Mode.OFF;
     this.targetTemperature = 20;
+    this.loadState();
 
     // create information service
     this.information = new hap.Service.AccessoryInformation()
@@ -114,7 +122,30 @@ class AdvancedThermostat implements AccessoryPlugin {
     setTimeout(this.runInterval.bind(this), 20000);
     setInterval(this.runInterval.bind(this), this.interval * 60000);
 
+    api.on('shutdown', this.saveState.bind(this));
+
     this.log.debug('Advanced thermostat finished initializing!');
+  }
+
+  private loadState(): void {
+    if (existsSync(this.persistPath)) {
+      const rawFile = readFileSync(this.persistPath, 'utf8');
+      const persistedState = JSON.parse(rawFile);
+      this.mode = persistedState.mode ?? this.mode;
+      this.targetTemperature = persistedState.targetTemperature ?? this.targetTemperature;
+      this.log.debug('State loaded from: ' + this.persistPath);
+    }
+  }
+
+  private saveState(): void {
+    writeFileSync(
+      this.persistPath,
+      JSON.stringify({
+        mode: this.mode,
+        targetTemperature: this.targetTemperature,
+      }),
+    );
+    this.log.debug('State saved to: ' + this.persistPath);
   }
 
   /*
@@ -191,7 +222,7 @@ class AdvancedThermostat implements AccessoryPlugin {
     this.integralError = Math.max(Math.min(this.integralError + this.cI * error * this.interval, 1), -1);
 
     // D
-    const differentialError = this.cD * (error - this.lastError) / this.interval;
+    const differentialError = this.cD * (error - (this.lastError ?? error)) / this.interval;
     this.lastError = error;
 
     // Control equation
