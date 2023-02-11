@@ -110,8 +110,8 @@ class AdvancedThermostat implements AccessoryPlugin {
       .setProps({ validValues: [hap.Characteristic.ProgrammableSwitchEvent.SINGLE_PRESS] });
 
     // Initialize
-    setTimeout(this.triggerCurrentTemperatureUpdate.bind(this));
-    setTimeout(this.runInterval.bind(this), 10000);
+    setTimeout(this.triggerCurrentTemperatureUpdate.bind(this), 10000);
+    setTimeout(this.runInterval.bind(this), 20000);
     setInterval(this.runInterval.bind(this), this.interval * 60000);
 
     this.log.debug('Advanced thermostat finished initializing!');
