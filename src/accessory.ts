@@ -104,10 +104,8 @@ class AdvancedThermostat implements AccessoryPlugin {
       .setProps({ minValue: 10, maxValue: 30});
 
     this.currentTemperature = this.thermostat.getCharacteristic(hap.Characteristic.CurrentTemperature);
-    this.currentTemperature.setProps({ perms: this.currentTemperature.props.perms.concat(Perms.PAIRED_WRITE) });
-
-    this.thermostat.getCharacteristic(hap.Characteristic.HeatingThresholdTemperature)
-      .onSet(this.setCurrentTemperature.bind(this));
+    this.currentTemperature.setProps({ perms: this.currentTemperature.props.perms.concat(Perms.PAIRED_WRITE) })
+      .onSet(t => log.debug('Current temperature: ' + t));
 
     // create trigger service
     this.trigger = new hap.Service.StatelessProgrammableSwitch();
@@ -174,20 +172,6 @@ class AdvancedThermostat implements AccessoryPlugin {
       this.thermostat,
       this.trigger,
     ];
-  }
-
-  getCurrentTemperature() : Nullable<CharacteristicValue> {
-    const currentTemperature = this.currentTemperature.value;
-    return currentTemperature;
-  }
-
-  /**
-   * Handle requests to set the "Target Temperature" characteristic
-   */
-  setCurrentTemperature(value: CharacteristicValue) {
-    this.log.debug('Current temperature: ' + (value as number).toFixed(1));
-    this.thermostat.updateCharacteristic(hap.Characteristic.CurrentTemperature, value);
-    this.thermostat.updateCharacteristic(hap.Characteristic.HeatingThresholdTemperature, value);
   }
 
   getStateName(state: CharacteristicValue): string {
