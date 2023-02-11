@@ -7,7 +7,6 @@ import {
   CharacteristicValue,
   HAP,
   Logging,
-  Nullable,
   Perms,
   Service,
 } from 'homebridge';
@@ -105,7 +104,7 @@ class AdvancedThermostat implements AccessoryPlugin {
 
     this.currentTemperature = this.thermostat.getCharacteristic(hap.Characteristic.CurrentTemperature);
     this.currentTemperature.setProps({ perms: this.currentTemperature.props.perms.concat(Perms.PAIRED_WRITE) })
-      .onSet(t => log.debug('Current temperature: ' + t));
+      .onSet(t => log.debug('Current temperature: ' + (t as number).toFixed(1)));
 
     // create trigger service
     this.trigger = new hap.Service.StatelessProgrammableSwitch();
