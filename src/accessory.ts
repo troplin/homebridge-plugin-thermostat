@@ -9,7 +9,8 @@ import {
   Nullable,
   Service,
 } from 'homebridge';
-import path from 'path';
+import path, { join } from 'path';
+import { compare } from 'semver';
 
 /*
  * IMPORTANT NOTICE
@@ -214,6 +215,19 @@ class AdvancedThermostat implements AccessoryPlugin {
     this.thermostat.updateCharacteristic(hap.Characteristic.HeatingThresholdTemperature, value);
   }
 
+  getStateName(state: CharacteristicValue): string {
+    switch(state) {
+      case this.State.OFF: return 'OFF';
+      case this.State.HEAT: return 'HEAT';
+      case this.State.COOL: return 'COOL';
+      default: return 'unknown';
+    }
+  }
+
+  getActionName(action: { state: CharacteristicValue; duration: number }): string {
+    return this.getStateName(action.state) + ' for ' + action.duration + ' min';
+  }
+
   runInterval() {
     // P
     const currentTemperature = this.getCurrentTemperature() ?? this.targetTemperature;
@@ -241,34 +255,23 @@ class AdvancedThermostat implements AccessoryPlugin {
       '), Limited: ' + controlFactorLimited.toFixed(2));
 
     // Determine action
-    const onMinutes = Math.round(Math.abs(controlFactorLimited) * this.interval);
-    const offMinutes = Math.round((1 - Math.abs(controlFactorLimited)) * this.interval);
-    const onState = controlFactorLimited >= 0 ? this.State.HEAT : this.State.COOL;
-    const onAction = controlFactorLimited >= 0 ? 'HEAT' : 'COOL';
+    const state = this.thermostat.getCharacteristic(this.State);
+    const actions = [ {
+      state: controlFactorLimited >= 0 ? this.State.HEAT : this.State.COOL,
+      duration: Math.round(Math.abs(controlFactorLimited) * this.interval),
+    }, {
+      state: this.State.OFF,
+      duration: Math.round((1 - Math.abs(controlFactorLimited)) * this.interval),
+    } ].filter(a => a.duration > 0)
+      .sort((a1, a2) => a1.state === state.value ||
+                        a2.state !== state.value && a1.state < a2.state ? -1 : 1);
 
     // Execute
-    if (onMinutes === 0) {
-      this.log.debug('Action: OFF for ' + offMinutes + ' min.');
-      this.thermostat.updateCharacteristic(this.State, this.State.OFF);
-    } else if (offMinutes === 0) {
-      this.log.debug('Action: ' + onAction + ' for ' + onMinutes + ' min.');
-      this.thermostat.updateCharacteristic(this.State, onState);
-    } else {
-      const currentState = this.thermostat.getCharacteristic(this.State).value;
-      if (currentState === onState) {
-        this.log.debug('Action: ' + onAction + ' for ' + onMinutes + ' min, then OFF for ' + offMinutes + ' min.');
-        this.thermostat.updateCharacteristic(this.State, onState);
-        setTimeout(() => {
-          this.thermostat.updateCharacteristic(this.State, this.State.OFF);
-        }, onMinutes * 60000);
-      } else {
-        this.log.debug('Action: OFF for ' + offMinutes + ' min, then ' + onAction + ' for ' + onMinutes + ' min.');
-        this.thermostat.updateCharacteristic(this.State, this.State.OFF);
-        setTimeout(() => {
-          this.thermostat.updateCharacteristic(this.State, onState);
-        }, offMinutes * 60000);
-      }
-    }
+    this.log.debug('Action: ' + actions.map(this.getActionName.bind(this)).join(', then ') + '.');
+    actions.reduce((timeout, action) => {
+      setTimeout(() => state.sendEventNotification(action.state), timeout * 60000);
+      return timeout + action.duration;
+    }, 0);
 
     // Set trigger for temperature update 10s before next interval
     setTimeout(this.triggerCurrentTemperatureUpdate.bind(this), this.interval * 60000 - 10000);
