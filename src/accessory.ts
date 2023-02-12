@@ -193,7 +193,9 @@ class AdvancedThermostat implements AccessoryPlugin {
     const proportionalFactor = this.cP * error;
 
     // I
-    this.accumulatedError = Math.max(Math.min(this.accumulatedError + error * this.interval, 100), -100);
+    const maxAccumulatedError = (this.mode.value === this.Mode.HEAT) || (this.mode.value === this.Mode.AUTO) ? 100 : 0;
+    const minAccumulatedError = (this.mode.value === this.Mode.COOL) || (this.mode.value === this.Mode.AUTO) ? -100 : 0;
+    this.accumulatedError = Math.max(Math.min(this.accumulatedError + error * this.interval, maxAccumulatedError), minAccumulatedError);
     const integralFactor = this.cI * this.accumulatedError;
 
     // D
