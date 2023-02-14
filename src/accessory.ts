@@ -74,7 +74,7 @@ class AdvancedThermostat implements AccessoryPlugin {
 
   // Internal state
   private lastError?: number;
-  private accumulatedError = 0;
+  private bias = 0;
 
   constructor(log: Logging, config: AccessoryConfig, api: API) {
     this.log = log;
@@ -128,14 +128,15 @@ class AdvancedThermostat implements AccessoryPlugin {
   }
 
   private loadState(): void {
-    let persistedState: { mode: CharacteristicValue; targetTemperature: CharacteristicValue; accumulatedError: number } | undefined;
+    let persistedState: { mode?: CharacteristicValue; targetTemperature?: CharacteristicValue; accumulatedError?: number; bias?: number }
+      | undefined;
     if (existsSync(this.persistPath)) {
       const rawFile = readFileSync(this.persistPath, 'utf8');
       persistedState = JSON.parse(rawFile);
     }
     this.mode.updateValue(persistedState?.mode ?? this.Mode.OFF);
     this.targetTemperature.updateValue(persistedState?.targetTemperature ?? 20);
-    this.accumulatedError = persistedState?.accumulatedError ?? this.accumulatedError;
+    this.bias = persistedState?.bias ?? this.cI * (persistedState?.accumulatedError ?? 0);
     if (persistedState !== undefined) {
       this.log.debug('State loaded from: ' + this.persistPath);
     }
@@ -147,7 +148,7 @@ class AdvancedThermostat implements AccessoryPlugin {
       JSON.stringify({
         mode: this.mode.value,
         targetTemperature: this.targetTemperature.value,
-        accumulatedError: this.accumulatedError,
+        bias: this.bias,
       }),
     );
     this.log.debug('State saved to: ' + this.persistPath);
@@ -193,10 +194,10 @@ class AdvancedThermostat implements AccessoryPlugin {
     const proportionalFactor = this.cP * error;
 
     // I
-    const maxAccumulatedError = (this.mode.value === this.Mode.HEAT) || (this.mode.value === this.Mode.AUTO) ? 100 : 0;
-    const minAccumulatedError = (this.mode.value === this.Mode.COOL) || (this.mode.value === this.Mode.AUTO) ? -100 : 0;
-    this.accumulatedError = Math.max(Math.min(this.accumulatedError + error * this.interval, maxAccumulatedError), minAccumulatedError);
-    const integralFactor = this.cI * this.accumulatedError;
+    const maxBias = (this.mode.value === this.Mode.HEAT) || (this.mode.value === this.Mode.AUTO) ? 1 : 0;
+    const minBias = (this.mode.value === this.Mode.COOL) || (this.mode.value === this.Mode.AUTO) ? -1 : 0;
+    this.bias = Math.max(Math.min(this.bias + this.cI * error * this.interval, maxBias), minBias);
+    const integralFactor = this.bias;
 
     // D
     const differentialError = (error - (this.lastError ?? error)) / this.interval;
