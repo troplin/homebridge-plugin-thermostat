@@ -75,6 +75,7 @@ class AdvancedThermostat implements AccessoryPlugin {
   // Internal state
   private lastError?: number;
   private bias = 0;
+  private carryOver = 0;
 
   constructor(log: Logging, config: AccessoryConfig, api: API) {
     this.log = log;
@@ -215,14 +216,19 @@ class AdvancedThermostat implements AccessoryPlugin {
       ', D: ' + differentialFactor.toFixed(3) +
       '), Limited: ' + controlFactorLimited.toFixed(2));
 
+    // Compute minutes used in this cycle and carry-over
+    this.carryOver += controlFactorLimited * this.interval;
+    const useMinutes = Math.trunc(this.carryOver);
+    this.carryOver -= useMinutes;
+
     // Determine action
     const state = this.thermostat.getCharacteristic(this.State);
     const actions = [ {
-      state: controlFactorLimited >= 0 ? this.State.HEAT : this.State.COOL,
-      duration: Math.round(Math.abs(controlFactorLimited) * this.interval),
+      state: useMinutes >= 0 ? this.State.HEAT : this.State.COOL,
+      duration: Math.abs(useMinutes),
     }, {
       state: this.State.OFF,
-      duration: this.interval - Math.round(Math.abs(controlFactorLimited) * this.interval),
+      duration: this.interval - Math.abs(useMinutes),
     } ].filter(a => a.duration > 0)
       .sort((a1, a2) => a1.state === state.value ||
                         a2.state !== state.value && a1.state < a2.state ? -1 : 1);
