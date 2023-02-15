@@ -210,11 +210,6 @@ class AdvancedThermostat implements AccessoryPlugin {
     const maxControlFactor = (this.mode.value === this.Mode.HEAT) || (this.mode.value === this.Mode.AUTO) ? 1 : 0;
     const minControlFactor = (this.mode.value === this.Mode.COOL) || (this.mode.value === this.Mode.AUTO) ? -1 : 0;
     const controlFactorLimited = Math.max(Math.min(controlFactor, maxControlFactor), minControlFactor);
-    this.log.debug('PID: ' + controlFactor.toFixed(2) +
-      ' (P: ' + proportionalFactor.toFixed(3) +
-      ', I: ' + integralFactor.toFixed(3) +
-      ', D: ' + differentialFactor.toFixed(3) +
-      '), Limited: ' + controlFactorLimited.toFixed(2));
 
     // Compute minutes used in this cycle and carry-over
     this.carryOver += controlFactorLimited * this.interval;
@@ -234,12 +229,18 @@ class AdvancedThermostat implements AccessoryPlugin {
                         a2.state !== state.value && a1.state < a2.state ? -1 : 1);
 
     // Execute
-    this.log.debug('Action: ' + actions.map(this.getActionName.bind(this)).join(', then ')
-      + ', carry over ' + Math.round(60 * this.carryOver) + ' sec.');
     actions.reduce((timeout, action) => {
       setTimeout(() => state.sendEventNotification(action.state), timeout * 60000);
       return timeout + action.duration;
     }, 0);
+
+    // Log
+    this.log.debug('PID: ' + controlFactor.toFixed(2) + ' ' +
+                      '(P: ' + proportionalFactor.toFixed(3) + ', ' +
+                       'I: ' + integralFactor.toFixed(3) + ', ' +
+                       'D: ' + differentialFactor.toFixed(3) + '), ' +
+                   'Action: ' + actions.map(this.getActionName.bind(this)).join(', then ') + ', ' +
+                        'carry over ' + Math.round(60 * this.carryOver) + ' sec.');
 
     // Set trigger for temperature update 10s before next interval
     setTimeout(this.triggerCurrentTemperatureUpdate.bind(this), this.interval * 60000 - 10000);
