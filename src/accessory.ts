@@ -234,7 +234,8 @@ class AdvancedThermostat implements AccessoryPlugin {
                         a2.state !== state.value && a1.state < a2.state ? -1 : 1);
 
     // Execute
-    this.log.debug('Action: ' + actions.map(this.getActionName.bind(this)).join(', then ') + '.');
+    this.log.debug('Action: ' + actions.map(this.getActionName.bind(this)).join(', then ')
+      + ', carry over ' + Math.round(60 * this.carryOver) + ' sec.');
     actions.reduce((timeout, action) => {
       setTimeout(() => state.sendEventNotification(action.state), timeout * 60000);
       return timeout + action.duration;
