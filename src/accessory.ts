@@ -186,8 +186,19 @@ class AdvancedThermostat implements AccessoryPlugin {
     }
   }
 
-  getActionName(action: { state: CharacteristicValue; duration: number }): string {
+  getActionString(action: { state: CharacteristicValue; duration: number }): string {
     return this.getStateName(action.state) + ' for ' + this.formatMinutes(action.duration);
+  }
+
+  getAction(minutes: number): { state: CharacteristicValue; duration: number } {
+    return {
+      state: minutes >= 0 ? this.State.HEAT : this.State.COOL,
+      duration: Math.abs(minutes),
+    };
+  }
+
+  getMinutesActionString(minutes: number): string {
+    return this.getActionString(this.getAction(minutes));
   }
 
   limitNumber(number: number, limit: number): number {
@@ -232,14 +243,11 @@ class AdvancedThermostat implements AccessoryPlugin {
     const budgetDiscarded = budgetTotal - budgetUsed - this.carryOver;
 
     // Determine action
+    const onAction = this.getAction(budgetUsed);
+    const offAction = { state: this.State.OFF, duration: this.interval - onAction.duration };
     const state = this.thermostat.getCharacteristic(this.State);
-    const actions = [ {
-      state: budgetUsed >= 0 ? this.State.HEAT : this.State.COOL,
-      duration: Math.abs(budgetUsed),
-    }, {
-      state: this.State.OFF,
-      duration: this.interval - Math.abs(budgetUsed),
-    } ].filter(a => a.duration > 0)
+    const actions = [ onAction, offAction ]
+      .filter(a => a.duration > 0)
       .sort((a1, a2) => a1.state === state.value ||
                         a2.state !== state.value && a1.state < a2.state ? -1 : 1);
 
@@ -254,9 +262,9 @@ class AdvancedThermostat implements AccessoryPlugin {
                       '(P: ' + proportionalFactor.toFixed(3) + ', ' +
                        'I: ' + integralFactor.toFixed(3) + ', ' +
                        'D: ' + differentialFactor.toFixed(3) + '), ' +
-                   'Action: ' + actions.map(this.getActionName.bind(this)).join(', then ') + ', ' +
-                        'carry over ' + this.formatMinutes(this.carryOver) +
-                        (budgetDiscarded !== 0 ? ', discard ' + this.formatMinutes(budgetDiscarded) : '') + '.');
+                   'Action: ' + actions.map(this.getActionString.bind(this)).join(', then ') +
+                        (this.carryOver !== 0 ? ', carry over ' + this.getMinutesActionString(this.carryOver) : '' ) +
+                        (budgetDiscarded !== 0 ? ', discard ' + this.getMinutesActionString(budgetDiscarded) : '') + '.');
 
     // Set trigger for temperature update 10s before next interval
     setTimeout(this.triggerCurrentTemperatureUpdate.bind(this), this.interval * 60000 - 10000);
