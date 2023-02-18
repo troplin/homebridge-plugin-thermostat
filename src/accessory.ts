@@ -58,6 +58,7 @@ class AdvancedThermostat implements AccessoryPlugin {
   // Configuration
   private readonly name: string;
   private readonly interval: number;
+  private readonly maxCarryOver: number;
   private readonly cP: number;
   private readonly cI: number;
   private readonly cD: number;
@@ -75,7 +76,7 @@ class AdvancedThermostat implements AccessoryPlugin {
   // Internal state
   private lastError?: number;
   private bias = 0;
-  private budget = 0;
+  private carryOver = 0;
 
   constructor(log: Logging, config: AccessoryConfig, api: API) {
     this.log = log;
@@ -83,6 +84,7 @@ class AdvancedThermostat implements AccessoryPlugin {
     // Configuration
     this.name = config.name;
     this.interval = config.interval;
+    this.maxCarryOver = config.maxCarryOver ?? 1;
     this.cP = config.pid.cP;
     this.cI = config.pid.cI;
     this.cD = config.pid.cD;
@@ -185,13 +187,23 @@ class AdvancedThermostat implements AccessoryPlugin {
   }
 
   getActionName(action: { state: CharacteristicValue; duration: number }): string {
-    return this.getStateName(action.state) + ' for ' + action.duration + ' min';
+    return this.getStateName(action.state) + ' for ' + this.formatMinutes(action.duration);
   }
 
   limitNumber(number: number, limit: number): number {
     const max = (this.mode.value === this.Mode.HEAT) || (this.mode.value === this.Mode.AUTO) ? limit : 0;
     const min = (this.mode.value === this.Mode.COOL) || (this.mode.value === this.Mode.AUTO) ? -limit : 0;
     return Math.max(Math.min(number, max), min);
+  }
+
+  formatMinutes(totalMinutes: number): string {
+    const hours = Math.trunc(totalMinutes / 60);
+    const remainingMinutes = Math.abs(totalMinutes - hours * 60);
+    const minutes = Math.trunc(remainingMinutes);
+    const seconds = Math.round(60 * (remainingMinutes - minutes));
+    return (hours !== 0 ? hours + ':' : '') +
+           ('00' + minutes).slice(-2) + ':' +
+           ('00' + seconds).slice(-2);
   }
 
   runInterval() {
@@ -213,9 +225,11 @@ class AdvancedThermostat implements AccessoryPlugin {
     const controlFactor = proportionalFactor + integralFactor + differentialFactor;
 
     // Compute budget used in this cycle and carry-over
-    this.budget += controlFactor * this.interval;
-    const budgetUsed = this.limitNumber(Math.trunc(this.budget), this.interval);
-    this.budget = this.limitNumber(this.budget - budgetUsed, 1);
+    const budgetTotal = controlFactor * this.interval + this.carryOver;
+    const budgetUsed = this.limitNumber(Math.trunc(budgetTotal), this.interval);
+    const budgetUnused = budgetTotal - budgetUsed;
+    this.carryOver = this.limitNumber(budgetUnused, this.maxCarryOver);
+    const budgetDiscarded = budgetTotal - budgetUsed - this.carryOver;
 
     // Determine action
     const state = this.thermostat.getCharacteristic(this.State);
@@ -241,7 +255,8 @@ class AdvancedThermostat implements AccessoryPlugin {
                        'I: ' + integralFactor.toFixed(3) + ', ' +
                        'D: ' + differentialFactor.toFixed(3) + '), ' +
                    'Action: ' + actions.map(this.getActionName.bind(this)).join(', then ') + ', ' +
-                        'carry over ' + Math.round(60 * this.budget) + ' sec.');
+                        'carry over ' + this.formatMinutes(this.carryOver) +
+                        (budgetDiscarded !== 0 ? ', discard ' + this.formatMinutes(budgetDiscarded) : '') + '.');
 
     // Set trigger for temperature update 10s before next interval
     setTimeout(this.triggerCurrentTemperatureUpdate.bind(this), this.interval * 60000 - 10000);

@@ -17,6 +17,13 @@
           "default": 10,
           "required": true
         },
+        "maxCarryOver": {
+          "title": "Maximum Carry-Over",
+          "description": "Maximum heating/cooling time that can be carried over to the next interval, in minutes",
+          "type": "number",
+          "default": 1,
+          "required": false
+        },
         "pid": {
           "title": "PID Control",
           "type": "object",
