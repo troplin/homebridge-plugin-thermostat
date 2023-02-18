@@ -261,8 +261,8 @@ class AdvancedThermostat implements AccessoryPlugin {
     this.log.debug('PID: ' + controlFactor.toFixed(2) + ' ' +
                       '(P: ' + proportionalFactor.toFixed(3) + ', ' +
                        'I: ' + integralFactor.toFixed(3) + ', ' +
-                       'D: ' + differentialFactor.toFixed(3) + '), ' +
-                   'Action: ' + actions.map(this.getActionString.bind(this)).join(', then ') +
+                       'D: ' + differentialFactor.toFixed(3) + ') ' +
+                   '=> ' + actions.map(this.getActionString.bind(this)).join(' => ') +
                         (this.carryOver !== 0 ? ', carry over ' + this.getMinutesActionString(this.carryOver) : '' ) +
                         (budgetDiscarded !== 0 ? ', discard ' + this.getMinutesActionString(budgetDiscarded) : '') + '.');
 
