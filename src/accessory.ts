@@ -187,7 +187,7 @@ class AdvancedThermostat implements AccessoryPlugin {
   }
 
   getActionString(action: { state: CharacteristicValue; duration: number }): string {
-    return this.getStateName(action.state) + ' for ' + this.formatMinutes(action.duration);
+    return this.getStateName(action.state) + ': ' + this.formatMinutes(action.duration);
   }
 
   getAction(minutes: number): { state: CharacteristicValue; duration: number } {
@@ -211,7 +211,7 @@ class AdvancedThermostat implements AccessoryPlugin {
     const hours = Math.trunc(totalMinutes / 60);
     const remainingMinutes = Math.abs(totalMinutes - hours * 60);
     const minutes = Math.trunc(remainingMinutes);
-    const seconds = Math.round(60 * (remainingMinutes - minutes));
+    const seconds = Math.trunc(60 * (remainingMinutes - minutes));
     return (hours !== 0 ? hours + ':' : '') +
            ('00' + minutes).slice(-2) + ':' +
            ('00' + seconds).slice(-2);
