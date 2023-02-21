@@ -212,8 +212,8 @@ class AdvancedThermostat implements AccessoryPlugin {
     const remainingMinutes = Math.abs(totalMinutes - hours * 60);
     const minutes = Math.trunc(remainingMinutes);
     const seconds = Math.trunc(60 * (remainingMinutes - minutes));
-    return (hours !== 0 ? hours + ':' : '') +
-           ('00' + minutes).slice(-2) + ':' +
+    return (hours !== 0 ? hours + ':' +
+           ('00' + minutes).slice(-2) + ':' : minutes + ':') +
            ('00' + seconds).slice(-2);
   }
 
