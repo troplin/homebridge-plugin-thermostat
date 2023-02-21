@@ -58,7 +58,7 @@ class AdvancedThermostat implements AccessoryPlugin {
   // Configuration
   private readonly name: string;
   private readonly interval: number;
-  private readonly maxCarryOver: number;
+  private readonly carryOverFade: number;
   private readonly cP: number;
   private readonly cI: number;
   private readonly cD: number;
@@ -84,7 +84,7 @@ class AdvancedThermostat implements AccessoryPlugin {
     // Configuration
     this.name = config.name;
     this.interval = config.interval;
-    this.maxCarryOver = config.maxCarryOver ?? 1;
+    this.carryOverFade = config.carryOverFade ?? 0.99;
     this.cP = config.pid.cP;
     this.cI = config.pid.cI;
     this.cD = config.pid.cD;
@@ -239,7 +239,7 @@ class AdvancedThermostat implements AccessoryPlugin {
     const budgetTotal = controlFactor * this.interval + this.carryOver;
     const budgetUsed = this.limitNumber(Math.trunc(budgetTotal), this.interval);
     const budgetUnused = budgetTotal - budgetUsed;
-    this.carryOver = this.limitNumber(budgetUnused, this.maxCarryOver);
+    this.carryOver = this.carryOverFade ** this.interval * budgetUnused;
     const budgetDiscarded = budgetTotal - budgetUsed - this.carryOver;
 
     // Determine action

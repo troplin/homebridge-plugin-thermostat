@@ -17,11 +17,11 @@
           "default": 10,
           "required": true
         },
-        "maxCarryOver": {
-          "title": "Maximum Carry-Over",
-          "description": "Maximum heating/cooling time that can be carried over to the next interval, in minutes",
+        "carryOverFade": {
+          "title": "Carry-Over Fade",
+          "description": "Factor by which the carry-over heating/cooling time is reduced each minute.",
           "type": "number",
-          "default": 1,
+          "default": 0.99,
           "required": false
         },
         "pid": {
