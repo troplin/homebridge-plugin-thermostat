@@ -207,6 +207,13 @@ class AdvancedThermostat implements AccessoryPlugin {
     return Math.max(Math.min(number, max), min);
   }
 
+  limitBottom(number: number) {
+    return this.mode.value === this.Mode.OFF ? 0 :
+      this.mode.value === this.Mode.HEAT ? Math.max(number, 0) :
+        this.mode.value === this.Mode.COOL ? Math.min(number, 0) :
+          number;
+  }
+
   formatMinutes(totalMinutes: number): string {
     const hours = Math.trunc(totalMinutes / 60);
     const remainingMinutes = Math.abs(totalMinutes - hours * 60);
@@ -239,7 +246,7 @@ class AdvancedThermostat implements AccessoryPlugin {
     const budgetTotal = controlFactor * this.interval + this.carryOver;
     const budgetUsed = this.limitNumber(Math.trunc(budgetTotal), this.interval);
     const budgetUnused = budgetTotal - budgetUsed;
-    this.carryOver = this.carryOverFade ** this.interval * budgetUnused;
+    this.carryOver = this.limitBottom(this.carryOverFade ** this.interval * budgetUnused);
     const budgetDiscarded = budgetTotal - budgetUsed - this.carryOver;
 
     // Determine action
