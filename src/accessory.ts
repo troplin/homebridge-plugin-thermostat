@@ -58,7 +58,8 @@ class AdvancedThermostat implements AccessoryPlugin {
   // Configuration
   private readonly name: string;
   private readonly interval: number;
-  private readonly carryOverFade: number;
+  private readonly budgetThreshold: number;
+  private readonly budgetFade: number;
   private readonly cP: number;
   private readonly cI: number;
   private readonly cD: number;
@@ -76,7 +77,7 @@ class AdvancedThermostat implements AccessoryPlugin {
   // Internal state
   private lastError?: number;
   private bias = 0;
-  private carryOver = 0;
+  private budget = 0;
 
   constructor(log: Logging, config: AccessoryConfig, api: API) {
     this.log = log;
@@ -84,7 +85,8 @@ class AdvancedThermostat implements AccessoryPlugin {
     // Configuration
     this.name = config.name;
     this.interval = config.interval;
-    this.carryOverFade = config.carryOverFade ?? 0.99;
+    this.budgetThreshold = config.budgetThreshold;
+    this.budgetFade = config.budgetFade ?? 0.99;
     this.cP = config.pid.cP;
     this.cI = config.pid.cI;
     this.cD = config.pid.cD;
@@ -242,36 +244,34 @@ class AdvancedThermostat implements AccessoryPlugin {
     // PID Control equation
     const controlFactor = proportionalFactor + integralFactor + differentialFactor;
 
-    // Compute budget used in this cycle and carry-over
-    const budgetTotal = controlFactor * this.interval + this.carryOver;
-    const budgetUsed = this.limitNumber(Math.trunc(budgetTotal), this.interval);
-    const budgetUnused = budgetTotal - budgetUsed;
-    this.carryOver = this.limitBottom(this.carryOverFade ** this.interval * budgetUnused);
-    const budgetDiscarded = budgetTotal - budgetUsed - this.carryOver;
-
-    // Determine action
-    const onAction = this.getAction(budgetUsed);
-    const offAction = { state: this.State.OFF, duration: this.interval - onAction.duration };
-    const state = this.thermostat.getCharacteristic(this.State);
-    const actions = [ onAction, offAction ]
-      .filter(a => a.duration > 0)
-      .sort((a1, a2) => a1.state === state.value ||
-                        a2.state !== state.value && a1.state < a2.state ? -1 : 1);
-
-    // Execute
-    actions.reduce((timeout, action) => {
-      setTimeout(() => state.sendEventNotification(action.state), timeout * 60000);
-      return timeout + action.duration;
-    }, 0);
+    // Compute budget
+    this.budget = this.limitBottom(controlFactor * this.interval + this.budgetFade ** this.interval * this.budget);
 
     // Log
     this.log.debug('PID: ' + controlFactor.toFixed(2) + ' ' +
                       '(P: ' + proportionalFactor.toFixed(3) + ', ' +
                        'I: ' + integralFactor.toFixed(3) + ', ' +
                        'D: ' + differentialFactor.toFixed(3) + ') ' +
-                   '=> ' + actions.map(a => '[' + this.getActionString(a) + ']').join(' => ') +
-                        (this.carryOver !== 0 ? ', carry over ' + this.getMinutesActionString(this.carryOver) : '' ) +
-                        (budgetDiscarded !== 0 ? ', discard ' + this.getMinutesActionString(budgetDiscarded) : '') + '.');
+                   '=> Budget: ' + this.getMinutesActionString(this.budget));
+
+    // Determine action
+    const state = this.thermostat.getCharacteristic(this.State);
+    const nextState = this.budget >= this.budgetThreshold ? this.State.HEAT :
+      this.budget <= -this.budgetThreshold ? this.State.COOL :
+        state.value === this.State.HEAT && this.budget < this.interval ? this.State.OFF :
+          state.value === this.State.COOL && this.budget > -this.interval ? this.State.OFF :
+            state.value ?? this.State.OFF;
+    if (state.value !== nextState) {
+      this.log.info('Change state to [' + this.getStateName(nextState) + ']');
+    }
+
+    // Execute
+    state.updateValue(nextState);
+    if (nextState === this.State.HEAT) {
+      this.budget -= this.interval;
+    } else if (nextState === this.State.COOL) {
+      this.budget += this.interval;
+    }
 
     // Set trigger for temperature update 10s before next interval
     setTimeout(this.triggerCurrentTemperatureUpdate.bind(this), this.interval * 60000 - 10000);

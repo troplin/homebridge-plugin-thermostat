@@ -14,12 +14,19 @@
           "title": "Interval",
           "description": "Interval, in minutes",
           "type": "number",
-          "default": 10,
+          "default": 1,
           "required": true
         },
-        "carryOverFade": {
-          "title": "Carry-Over Fade",
-          "description": "Factor by which the carry-over heating/cooling time is reduced each minute.",
+        "budgetThreshold": {
+          "title": "Budget Threshold",
+          "description": "The amount of heating/cooling budget in minutes required before turning on heating/cooling.",
+          "type": "number",
+          "default": 5,
+          "required": true
+        },
+        "budgetFade": {
+          "title": "Budget Fade",
+          "description": "Factor by which the heating/cooling time budget is reduced each minute.",
           "type": "number",
           "default": 0.99,
           "required": false
