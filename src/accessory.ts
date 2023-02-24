@@ -232,16 +232,21 @@ class AdvancedThermostat implements AccessoryPlugin {
     return date.getFullYear() + '-' + ('00' + (date.getMonth() + 1)).slice(-2) + '-' + ('00' + date.getDate()).slice(-2);
   }
 
-  toTimeString(date: Date): string {
-    const offset = date.getTimezoneOffset();
-    const offsetHours = Math.trunc(Math.abs(offset) / 60);
-    const offsetMinutes = Math.abs(offset) - 60 * offsetHours;
+  toTimeString(date: Date, includeOffset = true): string {
+    let offsetString = '';
+    if (includeOffset) {
+      const offset = date.getTimezoneOffset();
+      const offsetHours = Math.trunc(Math.abs(offset) / 60);
+      const offsetMinutes = Math.abs(offset) - 60 * offsetHours;
+      offsetString = ((offset === 0) ? 'Z' :
+        ((offset <= 0 ? '+' : '-') + ('00' + offsetHours).slice(-2) + ':' + ('00' + offsetMinutes).slice(-2)));
+    }
     return ('00' + date.getHours()).slice(-2) + ':' + ('00' + date.getMinutes()).slice(-2) + ':' + ('00' + date.getSeconds()).slice(-2) +
-      ((offset === 0) ? 'Z' : ((offset <= 0 ? '+' : '-') + ('00' + offsetHours).slice(-2) + ':' + ('00' + offsetMinutes).slice(-2)));
+      offsetString;
   }
 
-  toDateTimeString(date: Date): string {
-    return this.toDateString(date) + 'T' + this.toTimeString(date);
+  toDateTimeString(date: Date, includeOffset = true): string {
+    return this.toDateString(date) + 'T' + this.toTimeString(date, includeOffset);
   }
 
   logPidData(now: Date, pid: number, p: number, i: number, d: number): void {
@@ -252,9 +257,9 @@ class AdvancedThermostat implements AccessoryPlugin {
       const filePath = path.join(this.dataLogDir, fileName);
       if (!existsSync(filePath)) {
         mkdirSync(this.dataLogDir, {recursive: true});
-        appendFileSync(filePath, 'date,pid,p,i,d\n');
+        appendFileSync(filePath, 'date,localdate,pid,p,i,d\n');
       }
-      appendFileSync(filePath, `${this.toDateTimeString(now)},${pid},${p},${i},${d}\n`);
+      appendFileSync(filePath, `${this.toDateTimeString(now)},${this.toDateTimeString(now, false)},${pid},${p},${i},${d}\n`);
     }
   }
 
@@ -264,9 +269,10 @@ class AdvancedThermostat implements AccessoryPlugin {
       const filePath = path.join(this.dataLogDir, fileName);
       if (!existsSync(filePath)) {
         mkdirSync(this.dataLogDir, {recursive: true});
-        appendFileSync(filePath, 'date,budget,inherited,added,used,discarded\n');
+        appendFileSync(filePath, 'date,localdate,budget,inherited,added,used,discarded\n');
       }
-      appendFileSync(filePath, `${this.toDateTimeString(now)},${budget},${inherited},${added},${used},${discarded}\n`);
+      appendFileSync(filePath,
+        `${this.toDateTimeString(now)},${this.toDateTimeString(now, false)},${budget},${inherited},${added},${used},${discarded}\n`);
     }
   }
 
