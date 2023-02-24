@@ -251,7 +251,7 @@ class AdvancedThermostat implements AccessoryPlugin {
       const fileName = `pid-${this.toDateString(now)}.csv`;
       const filePath = path.join(this.dataLogDir, fileName);
       if (!existsSync(filePath)) {
-        mkdirSync(filePath, {recursive: true});
+        mkdirSync(this.dataLogDir, {recursive: true});
         appendFileSync(filePath, 'date,pid,p,i,d\n');
       }
       appendFileSync(filePath, `${this.toDateTimeString(now)},${pid},${p},${i},${d}\n`);
@@ -263,7 +263,7 @@ class AdvancedThermostat implements AccessoryPlugin {
       const fileName = `budget-${this.toDateString(now)}.csv`;
       const filePath = path.join(this.dataLogDir, fileName);
       if (!existsSync(filePath)) {
-        mkdirSync(filePath, {recursive: true});
+        mkdirSync(this.dataLogDir, {recursive: true});
         appendFileSync(filePath, 'date,budget,inherited,added,used,discarded\n');
       }
       appendFileSync(filePath, `${this.toDateTimeString(now)},${budget},${inherited},${added},${used},${discarded}\n`);
