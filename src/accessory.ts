@@ -229,7 +229,7 @@ class AdvancedThermostat implements AccessoryPlugin {
   }
 
   toDateString(date: Date): string {
-    return date.getFullYear() + '-' + (date.getMonth() + 1) + '-' + date.getDate();
+    return date.getFullYear() + '-' + ('00' + (date.getMonth() + 1)).slice(-2) + '-' + ('00' + date.getDate()).slice(-2);
   }
 
   toTimeString(date: Date): string {
@@ -237,7 +237,7 @@ class AdvancedThermostat implements AccessoryPlugin {
     const offsetHours = Math.trunc(Math.abs(offset) / 60);
     const offsetMinutes = Math.abs(offset) - 60 * offsetHours;
     return ('00' + date.getHours()).slice(-2) + ':' + ('00' + date.getMinutes()).slice(-2) + ':' + ('00' + date.getSeconds()).slice(-2) +
-      (offset === 0) ? 'Z' : ((offset >= 0 ? '+' : '-') + ('00' + offsetHours).slice(-2) + ':' + ('00' + offsetMinutes).slice(-2));
+      ((offset === 0) ? 'Z' : ((offset <= 0 ? '+' : '-') + ('00' + offsetHours).slice(-2) + ':' + ('00' + offsetMinutes).slice(-2)));
   }
 
   toDateTimeString(date: Date): string {
