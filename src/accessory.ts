@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, writeFileSync } from 'fs';
+import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs';
 import {
   AccessoryConfig,
   AccessoryPlugin,
@@ -63,6 +63,7 @@ class AdvancedThermostat implements AccessoryPlugin {
   private readonly cP: number;
   private readonly cI: number;
   private readonly cD: number;
+  private readonly dataLogDir: string;
 
   // Services
   private readonly thermostat: Service;
@@ -90,6 +91,7 @@ class AdvancedThermostat implements AccessoryPlugin {
     this.cP = config.pid.cP;
     this.cI = config.pid.cI;
     this.cD = config.pid.cD;
+    this.dataLogDir = config.dataLogDir;
 
     const uuid = api.hap.uuid.generate(config.name);
     this.persistPath = path.join(api.user.persistPath(), `${config.accessory}.${uuid}.json`);
@@ -226,7 +228,51 @@ class AdvancedThermostat implements AccessoryPlugin {
            ('00' + seconds).slice(-2);
   }
 
+  toDateString(date: Date): string {
+    return date.getFullYear() + '-' + (date.getMonth() + 1) + '-' + date.getDate();
+  }
+
+  toTimeString(date: Date): string {
+    const offset = date.getTimezoneOffset();
+    const offsetHours = Math.trunc(Math.abs(offset) / 60);
+    const offsetMinutes = Math.abs(offset) - 60 * offsetHours;
+    return ('00' + date.getHours()).slice(-2) + ':' + ('00' + date.getMinutes()).slice(-2) + ':' + ('00' + date.getSeconds()).slice(-2) +
+      (offset === 0) ? 'Z' : ((offset >= 0 ? '+' : '-') + ('00' + offsetHours).slice(-2) + ':' + ('00' + offsetMinutes).slice(-2));
+  }
+
+  toDateTimeString(date: Date): string {
+    return this.toDateString(date) + 'T' + this.toTimeString(date);
+  }
+
+  logPidData(now: Date, pid: number, p: number, i: number, d: number): void {
+    this.log.debug('PID: ' + pid.toFixed(2) + ' ' + '(P: ' + p.toFixed(3) + ', ' + 'I: ' + i.toFixed(3) + ', ' + 'D: ' + d.toFixed(3) + ') '
+                   + '=> Budget: ' + this.getMinutesActionString(this.budget));
+    if (this.dataLogDir && this.dataLogDir.trim()) {
+      const fileName = `pid-${this.toDateString(now)}.csv`;
+      const filePath = path.join(this.dataLogDir, fileName);
+      if (!existsSync(filePath)) {
+        mkdirSync(filePath, {recursive: true});
+        appendFileSync(filePath, 'date,pid,p,i,d\n');
+      }
+      appendFileSync(filePath, `${this.toDateTimeString(now)},${pid},${p},${i},${d}\n`);
+    }
+  }
+
+  logBudgetData(now: Date, budget: number, inherited: number, added: number, used: number, discarded: number): void {
+    if (this.dataLogDir && this.dataLogDir.trim()) {
+      const fileName = `budget-${this.toDateString(now)}.csv`;
+      const filePath = path.join(this.dataLogDir, fileName);
+      if (!existsSync(filePath)) {
+        mkdirSync(filePath, {recursive: true});
+        appendFileSync(filePath, 'date,budget,inherited,added,used,discarded\n');
+      }
+      appendFileSync(filePath, `${this.toDateTimeString(now)},${budget},${inherited},${added},${used},${discarded}\n`);
+    }
+  }
+
   runInterval() {
+    const state = this.thermostat.getCharacteristic(this.State);
+
     // P
     const currentTemperature = (this.currentTemperature.value ?? this.targetTemperature.value) as number;
     const error = this.targetTemperature.value as number - currentTemperature;
@@ -245,17 +291,14 @@ class AdvancedThermostat implements AccessoryPlugin {
     const controlFactor = proportionalFactor + integralFactor + differentialFactor;
 
     // Compute budget
-    this.budget = this.limitBottom(controlFactor * this.interval + this.budgetFade ** this.interval * this.budget);
-
-    // Log
-    this.log.debug('PID: ' + controlFactor.toFixed(2) + ' ' +
-                      '(P: ' + proportionalFactor.toFixed(3) + ', ' +
-                       'I: ' + integralFactor.toFixed(3) + ', ' +
-                       'D: ' + differentialFactor.toFixed(3) + ') ' +
-                   '=> Budget: ' + this.getMinutesActionString(this.budget));
+    const budgetUsed = state.value === this.State.HEAT ? this.interval : state.value === this.State.COOL ? -this.interval : 0;
+    this.budget -= budgetUsed;
+    const budgetInherited = this.budgetFade ** this.interval * this.budget;
+    const budgetDiscarded = this.budget - budgetInherited;
+    this.budget = this.limitBottom(controlFactor * this.interval + budgetInherited);
+    const budgetAdded = this.budget - budgetInherited;
 
     // Determine action
-    const state = this.thermostat.getCharacteristic(this.State);
     const nextState = this.budget >= this.budgetThreshold ? this.State.HEAT :
       this.budget <= -this.budgetThreshold ? this.State.COOL :
         state.value === this.State.HEAT && this.budget < this.interval ? this.State.OFF :
@@ -265,13 +308,13 @@ class AdvancedThermostat implements AccessoryPlugin {
       this.log.info('Change state to [' + this.getStateName(nextState) + ']');
     }
 
+    // Log
+    const now = new Date();
+    this.logPidData(now, controlFactor, proportionalFactor, integralFactor, differentialFactor);
+    this.logBudgetData(now, this.budget, budgetInherited, budgetAdded, budgetUsed, budgetDiscarded);
+
     // Execute
     state.updateValue(nextState);
-    if (nextState === this.State.HEAT) {
-      this.budget -= this.interval;
-    } else if (nextState === this.State.COOL) {
-      this.budget += this.interval;
-    }
 
     // Set trigger for temperature update 10s before next interval
     setTimeout(this.triggerCurrentTemperatureUpdate.bind(this), this.interval * 60000 - 10000);

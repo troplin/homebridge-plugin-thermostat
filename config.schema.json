@@ -57,6 +57,12 @@
               "required": true
             }
           }
+        },
+        "dataLogDir": {
+          "title": "Data Log Directory",
+          "description": "Directory where data is logged.",
+          "type": "string",
+          "required": false
         }
       }
     }
