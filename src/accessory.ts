@@ -310,14 +310,14 @@ class AdvancedThermostat implements AccessoryPlugin {
         state.value === this.State.HEAT && this.budget < this.interval ? this.State.OFF :
           state.value === this.State.COOL && this.budget > -this.interval ? this.State.OFF :
             state.value ?? this.State.OFF;
-    if (state.value !== nextState) {
-      this.log.info('Change state to [' + this.getStateName(nextState) + ']');
-    }
 
     // Log
     const now = new Date();
     this.logPidData(now, controlFactor, proportionalFactor, integralFactor, differentialFactor);
     this.logBudgetData(now, this.budget, budgetInherited, budgetAdded, budgetUsed, budgetDiscarded);
+    if (state.value !== nextState) {
+      this.log.info('Change state to [' + this.getStateName(nextState) + ']');
+    }
 
     // Execute
     state.updateValue(nextState);
