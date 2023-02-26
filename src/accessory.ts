@@ -262,7 +262,7 @@ class AdvancedThermostat implements AccessoryPlugin {
       appendFileSync(csvFilePath, `${this.toDateTimeString(now)},${this.toDateTimeString(now, false)},${pid},${p},${i},${d}\n`);
       const lineFileName = `${this.toDateString(now)}.line`;
       const lineFilePath = path.join(this.dataLogDir, lineFileName);
-      appendFileSync(lineFilePath, `thermostat-pid pid=${pid},p=${p},i=${i},d=${d} ${now}\n`);
+      appendFileSync(lineFilePath, `thermostat-pid pid=${pid},p=${p},i=${i},d=${d} ${now.valueOf()}\n`);
     }
   }
 
