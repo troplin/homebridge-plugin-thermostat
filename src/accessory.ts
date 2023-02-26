@@ -253,13 +253,16 @@ class AdvancedThermostat implements AccessoryPlugin {
     this.log.debug('PID: ' + pid.toFixed(2) + ' ' + '(P: ' + p.toFixed(3) + ', ' + 'I: ' + i.toFixed(3) + ', ' + 'D: ' + d.toFixed(3) + ') '
                    + '=> Budget: ' + this.getMinutesActionString(this.budget));
     if (this.dataLogDir && this.dataLogDir.trim()) {
-      const fileName = `pid-${this.toDateString(now)}.csv`;
-      const filePath = path.join(this.dataLogDir, fileName);
-      if (!existsSync(filePath)) {
+      const csvFileName = `pid-${this.toDateString(now)}.csv`;
+      const csvFilePath = path.join(this.dataLogDir, csvFileName);
+      if (!existsSync(csvFilePath)) {
         mkdirSync(this.dataLogDir, {recursive: true});
-        appendFileSync(filePath, 'date,localdate,pid,p,i,d\n');
+        appendFileSync(csvFilePath, 'date,localdate,pid,p,i,d\n');
       }
-      appendFileSync(filePath, `${this.toDateTimeString(now)},${this.toDateTimeString(now, false)},${pid},${p},${i},${d}\n`);
+      appendFileSync(csvFilePath, `${this.toDateTimeString(now)},${this.toDateTimeString(now, false)},${pid},${p},${i},${d}\n`);
+      const lineFileName = `${this.toDateString(now)}.line`;
+      const lineFilePath = path.join(this.dataLogDir, lineFileName);
+      appendFileSync(lineFilePath, `thermostat-pid pid=${pid},p=${p},i=${i},d=${d} {now}\n`);
     }
   }
 
