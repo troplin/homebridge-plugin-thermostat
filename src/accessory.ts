@@ -58,12 +58,18 @@ class AdvancedThermostat implements AccessoryPlugin {
   // Configuration
   private readonly name: string;
   private readonly interval: number;
-  private readonly budgetThreshold: number;
-  private readonly budgetFade: number;
   private readonly cP: number;
   private readonly cI: number;
   private readonly cD: number;
+  private readonly budgetThreshold: number;
+  private readonly budgetFade: number;
+
+  // Data Logging
   private readonly dataLogDir: string;
+  private readonly dataLogCsvPid: boolean;
+  private readonly dataLogCsvBudget: boolean;
+  private readonly dataLogInfluxPid: boolean;
+  private readonly dataLogInfluxTags: string[];
 
   // Services
   private readonly thermostat: Service;
@@ -86,12 +92,17 @@ class AdvancedThermostat implements AccessoryPlugin {
     // Configuration
     this.name = config.name;
     this.interval = config.interval;
-    this.budgetThreshold = config.budgetThreshold;
-    this.budgetFade = config.budgetFade ?? 0.99;
     this.cP = config.pid.cP;
     this.cI = config.pid.cI;
     this.cD = config.pid.cD;
-    this.dataLogDir = config.dataLogDir;
+    this.budgetThreshold = config.modulation.budgetThreshold;
+    this.budgetFade = config.modulation.budgetFade ?? 0.99;
+    this.dataLogDir = config.dataLog.dir;
+    this.dataLogCsvPid = config.dataLog.csv.measurements.includes('pid');
+    this.dataLogCsvBudget = config.dataLog.csv.measurements.includes('budget');
+    this.dataLogInfluxPid = config.dataLog.influx.measurements.includes('thermostat-pid');
+    this.dataLogInfluxTags = config.dataLog.influx.tags
+      .map((t: { name: string; value: string }) => `${t.name.replace(/[ ,=]/g, '\\$&')}=${t.value.replace(/[ ,=]/g, '\\$&')}`);
 
     const uuid = api.hap.uuid.generate(config.name);
     this.persistPath = path.join(api.user.persistPath(), `${config.accessory}.${uuid}.json`);
@@ -253,29 +264,36 @@ class AdvancedThermostat implements AccessoryPlugin {
     this.log.debug('PID: ' + pid.toFixed(2) + ' ' + '(P: ' + p.toFixed(3) + ', ' + 'I: ' + i.toFixed(3) + ', ' + 'D: ' + d.toFixed(3) + ') '
                    + '=> Budget: ' + this.getMinutesActionString(this.budget));
     if (this.dataLogDir && this.dataLogDir.trim()) {
-      const csvFileName = `pid-${this.toDateString(now)}.csv`;
-      const csvFilePath = path.join(this.dataLogDir, csvFileName);
-      if (!existsSync(csvFilePath)) {
-        mkdirSync(this.dataLogDir, {recursive: true});
-        appendFileSync(csvFilePath, 'date,localdate,pid,p,i,d\n');
+      mkdirSync(this.dataLogDir, {recursive: true});
+      if (this.dataLogCsvPid) {
+        const csvFileName = `pid-${this.toDateString(now)}.csv`;
+        const csvFilePath = path.join(this.dataLogDir, csvFileName);
+        if (!existsSync(csvFilePath)) {
+          appendFileSync(csvFilePath, 'date,localdate,pid,p,i,d\n');
+        }
+        appendFileSync(csvFilePath, `${this.toDateTimeString(now)},${this.toDateTimeString(now, false)},${pid},${p},${i},${d}\n`);
       }
-      appendFileSync(csvFilePath, `${this.toDateTimeString(now)},${this.toDateTimeString(now, false)},${pid},${p},${i},${d}\n`);
-      const lineFileName = `${this.toDateString(now)}.line`;
-      const lineFilePath = path.join(this.dataLogDir, lineFileName);
-      appendFileSync(lineFilePath, `thermostat-pid pid=${pid},p=${p},i=${i},d=${d} ${now.valueOf()}\n`);
+      if (this.dataLogInfluxPid) {
+        const lineFileName = `${this.toDateString(now)}.line`;
+        const lineFilePath = path.join(this.dataLogDir, lineFileName);
+        const measurementAndTags = ['thermostat-pid'].concat(this.dataLogInfluxTags).join(',');
+        appendFileSync(lineFilePath, `${measurementAndTags} pid=${pid},p=${p},i=${i},d=${d} ${now.valueOf()}\n`);
+      }
     }
   }
 
   logBudgetData(now: Date, budget: number, inherited: number, added: number, used: number, discarded: number): void {
     if (this.dataLogDir && this.dataLogDir.trim()) {
-      const fileName = `budget-${this.toDateString(now)}.csv`;
-      const filePath = path.join(this.dataLogDir, fileName);
-      if (!existsSync(filePath)) {
-        mkdirSync(this.dataLogDir, {recursive: true});
-        appendFileSync(filePath, 'date,localdate,budget,inherited,added,used,discarded\n');
+      mkdirSync(this.dataLogDir, {recursive: true});
+      if (this.dataLogCsvBudget) {
+        const fileName = `budget-${this.toDateString(now)}.csv`;
+        const filePath = path.join(this.dataLogDir, fileName);
+        if (!existsSync(filePath)) {
+          appendFileSync(filePath, 'date,localdate,budget,inherited,added,used,discarded\n');
+        }
+        appendFileSync(filePath,
+          `${this.toDateTimeString(now)},${this.toDateTimeString(now, false)},${budget},${inherited},${added},${used},${discarded}\n`);
       }
-      appendFileSync(filePath,
-        `${this.toDateTimeString(now)},${this.toDateTimeString(now, false)},${budget},${inherited},${added},${used},${discarded}\n`);
     }
   }
 

@@ -17,23 +17,11 @@
           "default": 1,
           "required": true
         },
-        "budgetThreshold": {
-          "title": "Budget Threshold",
-          "description": "The amount of heating/cooling budget in minutes required before turning on heating/cooling.",
-          "type": "number",
-          "default": 5,
-          "required": true
-        },
-        "budgetFade": {
-          "title": "Budget Fade",
-          "description": "Factor by which the heating/cooling time budget is reduced each minute.",
-          "type": "number",
-          "default": 0.99,
-          "required": false
-        },
         "pid": {
           "title": "PID Control",
           "type": "object",
+          "expandable": true,
+          "expanded": false,
           "properties": {
             "cP": {
               "title": "P",
@@ -58,11 +46,94 @@
             }
           }
         },
-        "dataLogDir": {
-          "title": "Data Log Directory",
-          "description": "Directory where data is logged.",
-          "type": "string",
-          "required": false
+        "modulation": {
+          "title": "Modulation",
+          "type": "object",
+          "expandable": true,
+          "expanded": false,
+          "properties": {
+            "budgetThreshold": {
+              "title": "Budget Threshold",
+              "description": "The amount of heating/cooling budget in minutes required before turning on heating/cooling.",
+              "type": "number",
+              "default": 5,
+              "required": true
+            },
+            "budgetFade": {
+              "title": "Budget Fade",
+              "description": "Factor by which the heating/cooling time budget is reduced each minute.",
+              "type": "number",
+              "default": 0.99,
+              "required": false
+            }
+          }
+        },
+        "dataLog": {
+          "title": "Data Logging",
+          "type": "object",
+          "expandable": true,
+          "expanded": false,
+          "properties": {
+            "dir": {
+              "title": "Directory",
+              "description": "Directory where data is logged.",
+              "type": "string",
+              "required": false
+            },
+            "csv": {
+              "title": "CSV",
+              "type": "object",
+              "expandable": true,
+              "expanded": false,
+              "properties": {
+                "measurements": {
+                  "type": "array",
+                  "uniqueItems": true,
+                  "items": {
+                    "type": "string",
+                    "enum": [ "pid", "budget" ]
+                  }
+                }
+              }
+            },
+            "influx": {
+              "title": "Influx DB Line File",
+              "type": "object",
+              "expandable": true,
+              "expanded": false,
+              "properties": {
+                "measurements": {
+                  "type": "array",
+                  "uniqueItems": true,
+                  "items": {
+                    "type": "string",
+                    "enum": [
+                      "thermostat-pid"
+                    ]
+                  }
+                },
+                "tags": {
+                  "type": "array",
+                  "expandable": true,
+                  "expanded": false,
+                  "items": {
+                    "type": "object",
+                    "title": "Tag",
+                    "properties": {
+                      "name": {
+                        "type": "string",
+                        "required": true
+                      },
+                      "value": {
+                        "type": "string",
+                        "required": true
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
         }
       }
     }
