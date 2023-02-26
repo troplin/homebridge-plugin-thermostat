@@ -74,18 +74,18 @@
           "expandable": true,
           "expanded": false,
           "properties": {
-            "dir": {
-              "title": "Directory",
-              "description": "Directory where data is logged.",
-              "type": "string",
-              "required": false
-            },
             "csv": {
               "title": "CSV",
               "type": "object",
               "expandable": true,
               "expanded": false,
               "properties": {
+                "dir": {
+                  "title": "Directory",
+                  "description": "Directory where data is logged.",
+                  "type": "string",
+                  "required": false
+                },
                 "measurements": {
                   "type": "array",
                   "uniqueItems": true,
@@ -97,11 +97,23 @@
               }
             },
             "influx": {
-              "title": "Influx DB Line File",
+              "title": "Influx DB",
               "type": "object",
               "expandable": true,
               "expanded": false,
               "properties": {
+                "host": {
+                  "type": "string"
+                },
+                "token": {
+                  "type": "string"
+                },
+                "org": {
+                  "type": "string"
+                },
+                "bucket": {
+                  "type": "string"
+                },
                 "measurements": {
                   "type": "array",
                   "uniqueItems": true,

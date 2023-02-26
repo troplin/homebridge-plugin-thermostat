@@ -2,7 +2,7 @@
   "private": true,
   "displayName": "Advanced Thermostat",
   "name": "homebridge-advanced-thermostat",
-  "version": "0.11.0",
+  "version": "0.12.0",
   "description": "Homebridge plugin providing an advanced dummy thermostat",
   "main": "dist/accessory.js",
   "scripts": {
@@ -45,5 +45,9 @@
     "rimraf": "^3.0.2",
     "ts-node": "^10.3.0",
     "typescript": "^4.4.4"
+  },
+  "dependencies": {
+    "@influxdata/influxdb-client": "^1.33.2",
+    "@influxdata/influxdb-client-apis": "^1.33.2"
   }
 }
