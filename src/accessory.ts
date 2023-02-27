@@ -71,11 +71,11 @@ class AdvancedThermostat implements AccessoryPlugin {
 
   // Data Logging
   private readonly dataLogCsvDir: string;
-  private readonly dataLogCsvPid: boolean;
   private readonly dataLogCsvBudget: boolean;
   private readonly influxDB?: InfluxDB;
   private readonly influxWriteApi?: WriteApi;
   private readonly dataLogInfluxPid: boolean;
+  private readonly dataLogInfluxBudget: boolean;
   private readonly dataLogInfluxTags: { name: string; value: string }[];
 
   // Services
@@ -105,12 +105,12 @@ class AdvancedThermostat implements AccessoryPlugin {
     this.budgetThreshold = config.modulation.budgetThreshold;
     this.budgetFade = config.modulation.budgetFade ?? 0.99;
     this.dataLogCsvDir = config.dataLog.csv.dir;
-    this.dataLogCsvPid = config.dataLog.csv.measurements.includes('pid');
     this.dataLogCsvBudget = config.dataLog.csv.measurements.includes('budget');
     this.influxDB = config.dataLog.influx.host ? new InfluxDB({ url: config.dataLog.influx.host, token: config.dataLog.influx.token})
       : undefined;
     this.influxWriteApi = this.influxDB?.getWriteApi(config.dataLog.influx.org, config.dataLog.influx.bucket);
     this.dataLogInfluxPid = config.dataLog.influx.measurements.includes('thermostat-pid');
+    this.dataLogInfluxBudget = config.dataLog.influx.measurements.includes('thermostat-budget');
     this.dataLogInfluxTags = config.dataLog.influx.tags;
 
     const uuid = api.hap.uuid.generate(config.name);
@@ -272,17 +272,6 @@ class AdvancedThermostat implements AccessoryPlugin {
   logPidData(now: Date, pid: number, p: number, i: number, d: number): void {
     this.log.debug('PID: ' + pid.toFixed(2) + ' ' + '(P: ' + p.toFixed(3) + ', ' + 'I: ' + i.toFixed(3) + ', ' + 'D: ' + d.toFixed(3) + ') '
                    + '=> Budget: ' + this.getMinutesActionString(this.budget));
-    if (this.dataLogCsvDir && this.dataLogCsvDir.trim()) {
-      mkdirSync(this.dataLogCsvDir, {recursive: true});
-      if (this.dataLogCsvPid) {
-        const csvFileName = `pid-${this.toDateString(now)}.csv`;
-        const csvFilePath = path.join(this.dataLogCsvDir, csvFileName);
-        if (!existsSync(csvFilePath)) {
-          appendFileSync(csvFilePath, 'date,localdate,pid,p,i,d\n');
-        }
-        appendFileSync(csvFilePath, `${this.toDateTimeString(now)},${this.toDateTimeString(now, false)},${pid},${p},${i},${d}\n`);
-      }
-    }
     if (this.influxWriteApi && this.dataLogInfluxPid) {
       const dataPoint = new Point('thermostat-pid')
         .floatField('pid', pid).floatField('p', p).floatField('i', i).floatField('d', d)
@@ -304,6 +293,13 @@ class AdvancedThermostat implements AccessoryPlugin {
         appendFileSync(filePath,
           `${this.toDateTimeString(now)},${this.toDateTimeString(now, false)},${budget},${inherited},${added},${used},${discarded}\n`);
       }
+    }
+    if (this.influxWriteApi && this.dataLogInfluxBudget) {
+      const dataPoint = new Point('thermostat-budget')
+        .floatField('budget', budget)
+        .timestamp(now);
+      this.dataLogInfluxTags.forEach(t => dataPoint.tag(t.name, t.value));
+      this.influxWriteApi.writePoint(dataPoint);
     }
   }
 

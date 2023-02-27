@@ -91,7 +91,7 @@
                   "uniqueItems": true,
                   "items": {
                     "type": "string",
-                    "enum": [ "pid", "budget" ]
+                    "enum": [ "budget" ]
                   }
                 }
               }
@@ -120,7 +120,8 @@
                   "items": {
                     "type": "string",
                     "enum": [
-                      "thermostat-pid"
+                      "thermostat-pid",
+                      "thermostat-budget"
                     ]
                   }
                 },
