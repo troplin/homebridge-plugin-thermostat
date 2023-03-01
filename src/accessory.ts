@@ -93,6 +93,7 @@ class AdvancedThermostat implements AccessoryPlugin {
   private lastError?: number;
   private bias = 0;
   private budget = 0;
+  private budgetDiscardedTotal = 0;
 
   constructor(log: Logging, config: AccessoryConfig, api: API) {
     this.log = log;
@@ -308,6 +309,7 @@ class AdvancedThermostat implements AccessoryPlugin {
     if (this.influxWriteApi && this.dataLogInfluxBudget) {
       const dataPoint = new Point('thermostat-budget')
         .floatField('budget', budget)
+        .floatField('budget-discarded', this.budgetDiscardedTotal)
         .timestamp(now);
       this.dataLogInfluxTags.forEach(t => dataPoint.tag(t.name, t.value));
       this.influxWriteApi.writePoint(dataPoint);
@@ -337,6 +339,7 @@ class AdvancedThermostat implements AccessoryPlugin {
     this.budget -= budgetUsed;
     const budgetInherited = this.budgetFade ** this.interval * this.budget;
     const budgetDiscarded = this.budget - budgetInherited;
+    this.budgetDiscardedTotal = this.budgetFade ** this.interval * this.budgetDiscardedTotal + budgetDiscarded;
     this.budget = this.limitBottom(controlFactor * this.interval + budgetInherited);
     const budgetAdded = this.budget - budgetInherited;
 
