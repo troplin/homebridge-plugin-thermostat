@@ -17,6 +17,20 @@
           "default": 1,
           "required": true
         },
+        "modes": {
+          "title": "Supported Modes",
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "enum": [
+              "heat",
+              "cool"
+            ]
+          },
+          "default": [ "heat" ],
+          "required": true
+        },
         "pid": {
           "title": "PID Control",
           "type": "object",

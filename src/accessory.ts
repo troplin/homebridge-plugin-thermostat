@@ -87,6 +87,7 @@ class AdvancedThermostat implements AccessoryPlugin {
   private readonly mode: Characteristic;
   private readonly targetTemperature: Characteristic;
   private readonly currentTemperature: Characteristic;
+  private readonly state: Characteristic;
 
   // Internal state
   private lastError?: number;
@@ -124,7 +125,12 @@ class AdvancedThermostat implements AccessoryPlugin {
     // create thermostat service
     this.thermostat = new hap.Service.Thermostat(this.name);
 
+    const validModes = [this.Mode.OFF].concat(config.modes.map((m: string) => m === 'heat' ? this.Mode.HEAT : this.Mode.COOL));
+    if (config.modes.includes('heat') && config.modes.includes('cool')) {
+      validModes.push(this.Mode.AUTO);
+    }
     this.mode = this.thermostat.getCharacteristic(this.Mode);
+    this.mode.setProps({ validValues: validModes });
 
     this.targetTemperature = this.thermostat.getCharacteristic(hap.Characteristic.TargetTemperature)
       .setProps({ minValue: 10, maxValue: 30});
@@ -132,6 +138,11 @@ class AdvancedThermostat implements AccessoryPlugin {
     this.currentTemperature = this.thermostat.getCharacteristic(hap.Characteristic.CurrentTemperature);
     this.currentTemperature.setProps({ perms: this.currentTemperature.props.perms.concat(Perms.PAIRED_WRITE) })
       .onSet(t => log.debug('Current temperature: ' + (t as number).toFixed(1)));
+
+    this.state = this.thermostat.getCharacteristic(this.State);
+    this.state.setProps({
+      validValues: [this.State.OFF].concat(config.modes.map((m: string) => m === 'heat' ? this.State.HEAT : this.State.COOL)),
+    });
 
     // create trigger service
     this.trigger = new hap.Service.StatelessProgrammableSwitch();
@@ -304,8 +315,6 @@ class AdvancedThermostat implements AccessoryPlugin {
   }
 
   runInterval() {
-    const state = this.thermostat.getCharacteristic(this.State);
-
     // P
     const currentTemperature = (this.currentTemperature.value ?? this.targetTemperature.value) as number;
     const error = this.targetTemperature.value as number - currentTemperature;
@@ -324,7 +333,7 @@ class AdvancedThermostat implements AccessoryPlugin {
     const controlFactor = proportionalFactor + integralFactor + differentialFactor;
 
     // Compute budget
-    const budgetUsed = state.value === this.State.HEAT ? this.interval : state.value === this.State.COOL ? -this.interval : 0;
+    const budgetUsed = this.state.value === this.State.HEAT ? this.interval : this.state.value === this.State.COOL ? -this.interval : 0;
     this.budget -= budgetUsed;
     const budgetInherited = this.budgetFade ** this.interval * this.budget;
     const budgetDiscarded = this.budget - budgetInherited;
@@ -334,21 +343,21 @@ class AdvancedThermostat implements AccessoryPlugin {
     // Determine action
     const nextState = this.budget >= this.budgetThreshold ? this.State.HEAT :
       this.budget <= -this.budgetThreshold ? this.State.COOL :
-        state.value === this.State.HEAT && this.budget < this.interval ? this.State.OFF :
-          state.value === this.State.COOL && this.budget > -this.interval ? this.State.OFF :
-            state.value ?? this.State.OFF;
+        this.state.value === this.State.HEAT && this.budget < this.interval ? this.State.OFF :
+          this.state.value === this.State.COOL && this.budget > -this.interval ? this.State.OFF :
+            this.state.value ?? this.State.OFF;
 
     // Log
     const now = new Date();
     this.logPidData(now, controlFactor, proportionalFactor, integralFactor, differentialFactor);
     this.logBudgetData(now, this.budget, budgetInherited, budgetAdded, budgetUsed, budgetDiscarded);
     this.influxWriteApi?.flush()?.catch(r => this.log.error('Error writing to InfluxDB: ' + r));
-    if (state.value !== nextState) {
+    if (this.state.value !== nextState) {
       this.log.info('Change state to [' + this.getStateName(nextState) + ']');
     }
 
     // Execute
-    state.updateValue(nextState);
+    this.state.updateValue(nextState);
 
     // Set trigger for temperature update 10s before next interval
     setTimeout(this.triggerCurrentTemperatureUpdate.bind(this), this.interval * 60000 - 10000);
