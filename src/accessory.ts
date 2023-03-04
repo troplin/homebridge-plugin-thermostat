@@ -74,9 +74,9 @@ class AdvancedThermostat implements AccessoryPlugin {
   private readonly dataLogCsvBudget: boolean;
   private readonly influxDB?: InfluxDB;
   private readonly influxWriteApi?: WriteApi;
+  private readonly dataLogInfluxBasic: boolean;
   private readonly dataLogInfluxPid: boolean;
   private readonly dataLogInfluxBudget: boolean;
-  private readonly dataLogInfluxTags: { name: string; value: string }[];
 
   // Services
   private readonly thermostat: Service;
@@ -110,10 +110,12 @@ class AdvancedThermostat implements AccessoryPlugin {
     this.dataLogCsvBudget = config.dataLog.csv.measurements.includes('budget');
     this.influxDB = config.dataLog.influx.host ? new InfluxDB({ url: config.dataLog.influx.host, token: config.dataLog.influx.token})
       : undefined;
-    this.influxWriteApi = this.influxDB?.getWriteApi(config.dataLog.influx.org, config.dataLog.influx.bucket, 's');
+    this.influxWriteApi = this.influxDB?.getWriteApi(config.dataLog.influx.org, config.dataLog.influx.bucket, 's')
+      .useDefaultTags({ accessory: config.name })
+      .useDefaultTags(Object.fromEntries(config.dataLog.influx.tags.map((t: { name: string; value: string }) => [t.name, t.value])));
+    this.dataLogInfluxBasic = config.dataLog.influx.measurements.includes('thermostat');
     this.dataLogInfluxPid = config.dataLog.influx.measurements.includes('thermostat-pid');
     this.dataLogInfluxBudget = config.dataLog.influx.measurements.includes('thermostat-budget');
-    this.dataLogInfluxTags = config.dataLog.influx.tags;
 
     const uuid = api.hap.uuid.generate(config.name);
     this.persistPath = path.join(api.user.persistPath(), `${config.accessory}.${uuid}.json`);
@@ -213,7 +215,17 @@ class AdvancedThermostat implements AccessoryPlugin {
     ];
   }
 
-  getStateName(state: CharacteristicValue): string {
+  getModeName(state: CharacteristicValue | undefined | null): string {
+    switch(state) {
+      case this.Mode.OFF: return 'OFF';
+      case this.Mode.HEAT: return 'HEAT';
+      case this.Mode.COOL: return 'COOL';
+      case this.Mode.AUTO: return 'AUTO';
+      default: return 'unknown';
+    }
+  }
+
+  getStateName(state: CharacteristicValue | undefined | null): string {
     switch(state) {
       case this.State.OFF: return 'OFF';
       case this.State.HEAT: return 'HEAT';
@@ -281,6 +293,23 @@ class AdvancedThermostat implements AccessoryPlugin {
     return this.toDateString(date) + 'T' + this.toTimeString(date, includeOffset);
   }
 
+  logBasicData(now: Date, nextState: CharacteristicValue): void {
+    if (this.state.value !== nextState) {
+      this.log.info('Change state to [' + this.getStateName(nextState) + ']');
+    }
+    if (this.influxWriteApi && this.dataLogInfluxBasic) {
+      const dataPoint = new Point('thermostat')
+        .stringField('mode', this.getModeName(this.mode.value).toLowerCase())
+        .floatField('target-temperature', this.targetTemperature.value)
+        .floatField('current-temperature', this.currentTemperature.value)
+        .stringField('state', this.getStateName(this.state.value).toLowerCase())
+        .booleanField('heating', this.state.value === this.State.HEAT)
+        .booleanField('cooling', this.state.value === this.State.COOL)
+        .timestamp(now);
+      this.influxWriteApi.writePoint(dataPoint);
+    }
+  }
+
   logPidData(now: Date, pid: number, p: number, i: number, d: number): void {
     this.log.debug('PID: ' + pid.toFixed(2) + ' ' + '(P: ' + p.toFixed(3) + ', ' + 'I: ' + i.toFixed(3) + ', ' + 'D: ' + d.toFixed(3) + ') '
                    + '=> Budget: ' + this.getMinutesActionString(this.budget));
@@ -288,7 +317,6 @@ class AdvancedThermostat implements AccessoryPlugin {
       const dataPoint = new Point('thermostat-pid')
         .floatField('pid', pid).floatField('p', p).floatField('i', i).floatField('d', d)
         .timestamp(now);
-      this.dataLogInfluxTags.forEach(t => dataPoint.tag(t.name, t.value));
       this.influxWriteApi.writePoint(dataPoint);
     }
   }
@@ -311,7 +339,6 @@ class AdvancedThermostat implements AccessoryPlugin {
         .floatField('budget', budget)
         .floatField('budget-discarded', this.budgetDiscardedTotal)
         .timestamp(now);
-      this.dataLogInfluxTags.forEach(t => dataPoint.tag(t.name, t.value));
       this.influxWriteApi.writePoint(dataPoint);
     }
   }
@@ -338,9 +365,11 @@ class AdvancedThermostat implements AccessoryPlugin {
     const budgetUsed = this.state.value === this.State.HEAT ? this.interval : this.state.value === this.State.COOL ? -this.interval : 0;
     this.budget -= budgetUsed;
     const budgetInherited = this.budgetFade ** this.interval * this.budget;
-    const budgetDiscarded = this.budget - budgetInherited;
+    const budgetFaded = this.budget - budgetInherited;
+    const bugdetUnlimited = controlFactor * this.interval + budgetInherited;
+    this.budget = this.limitBottom(bugdetUnlimited);
+    const budgetDiscarded = bugdetUnlimited - this.budget + budgetFaded;
     this.budgetDiscardedTotal = this.budgetFade ** this.interval * this.budgetDiscardedTotal + budgetDiscarded;
-    this.budget = this.limitBottom(controlFactor * this.interval + budgetInherited);
     const budgetAdded = this.budget - budgetInherited;
 
     // Determine action
@@ -354,10 +383,8 @@ class AdvancedThermostat implements AccessoryPlugin {
     const now = new Date();
     this.logPidData(now, controlFactor, proportionalFactor, integralFactor, differentialFactor);
     this.logBudgetData(now, this.budget, budgetInherited, budgetAdded, budgetUsed, budgetDiscarded);
+    this.logBasicData(now, nextState);
     this.influxWriteApi?.flush()?.catch(r => this.log.error('Error writing to InfluxDB: ' + r));
-    if (this.state.value !== nextState) {
-      this.log.info('Change state to [' + this.getStateName(nextState) + ']');
-    }
 
     // Execute
     this.state.updateValue(nextState);

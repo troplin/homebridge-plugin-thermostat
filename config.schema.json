@@ -134,6 +134,7 @@
                   "items": {
                     "type": "string",
                     "enum": [
+                      "thermostat",
                       "thermostat-pid",
                       "thermostat-budget"
                     ]
