@@ -122,8 +122,8 @@ class AdvancedThermostat implements AccessoryPlugin {
 
     // create information service
     this.information = new hap.Service.AccessoryInformation()
-      .setCharacteristic(hap.Characteristic.Manufacturer, 'Custom Manufacturer')
-      .setCharacteristic(hap.Characteristic.Model, 'Custom Model');
+      .setCharacteristic(hap.Characteristic.Manufacturer, 'troplin Software')
+      .setCharacteristic(hap.Characteristic.Model, 'Advanced Thermostat');
 
     // create thermostat service
     this.thermostat = new hap.Service.Thermostat(this.name);
