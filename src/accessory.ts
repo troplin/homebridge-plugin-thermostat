@@ -302,9 +302,10 @@ class AdvancedThermostat implements AccessoryPlugin {
         .stringField('mode', this.getModeName(this.mode.value).toLowerCase())
         .floatField('target-temperature', this.targetTemperature.value)
         .floatField('current-temperature', this.currentTemperature.value)
-        .stringField('state', this.getStateName(this.state.value).toLowerCase())
-        .booleanField('heating', this.state.value === this.State.HEAT)
-        .booleanField('cooling', this.state.value === this.State.COOL)
+        .stringField('state', this.getStateName(nextState).toLowerCase())
+        .floatField('rate', nextState === this.State.HEAT ? 1 : (nextState === this.State.COOL ? -1 : 0))
+        .booleanField('heating', nextState === this.State.HEAT)
+        .booleanField('cooling', nextState === this.State.COOL)
         .timestamp(now);
       this.influxWriteApi.writePoint(dataPoint);
     }
