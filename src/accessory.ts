@@ -1,4 +1,4 @@
-import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs';
+import { existsSync, readFileSync, writeFileSync } from 'fs';
 import {
   AccessoryConfig,
   AccessoryPlugin,
@@ -62,16 +62,12 @@ class AdvancedThermostat implements AccessoryPlugin {
 
   // Configuration
   private readonly name: string;
-  private readonly interval: number;
   private readonly cP: number;
   private readonly cI: number;
   private readonly cD: number;
   private readonly budgetThreshold: number;
-  private readonly budgetFade: number;
 
   // Data Logging
-  private readonly dataLogCsvDir: string;
-  private readonly dataLogCsvBudget: boolean;
   private readonly influxDB?: InfluxDB;
   private readonly influxWriteApi?: WriteApi;
   private readonly dataLogInfluxBasic: boolean;
@@ -90,24 +86,21 @@ class AdvancedThermostat implements AccessoryPlugin {
   private readonly state: Characteristic;
 
   // Internal state
-  private lastError?: number;
+  private scheduledUpdate: NodeJS.Timeout;
+  private updated?: Date;
+  private error?: number;
   private bias = 0;
   private budget = 0;
-  private budgetDiscardedTotal = 0;
 
   constructor(log: Logging, config: AccessoryConfig, api: API) {
     this.log = log;
 
     // Configuration
     this.name = config.name;
-    this.interval = config.interval;
     this.cP = config.pid.cP;
     this.cI = config.pid.cI;
     this.cD = config.pid.cD;
     this.budgetThreshold = config.modulation.budgetThreshold;
-    this.budgetFade = config.modulation.budgetFade ?? 0.99;
-    this.dataLogCsvDir = config.dataLog.csv.dir;
-    this.dataLogCsvBudget = config.dataLog.csv.measurements.includes('budget');
     this.influxDB = config.dataLog.influx.host ? new InfluxDB({ url: config.dataLog.influx.host, token: config.dataLog.influx.token})
       : undefined;
     this.influxWriteApi = this.influxDB?.getWriteApi(config.dataLog.influx.org, config.dataLog.influx.bucket, 's')
@@ -136,11 +129,13 @@ class AdvancedThermostat implements AccessoryPlugin {
     this.mode.setProps({ validValues: validModes });
 
     this.targetTemperature = this.thermostat.getCharacteristic(hap.Characteristic.TargetTemperature)
-      .setProps({ minValue: 10, maxValue: 30});
+      .setProps({ minValue: 10, maxValue: 30})
+      .onSet(this.updateTargetTemperature.bind(this));
 
     this.currentTemperature = this.thermostat.getCharacteristic(hap.Characteristic.CurrentTemperature);
-    this.currentTemperature.setProps({ perms: this.currentTemperature.props.perms.concat(Perms.PAIRED_WRITE) })
-      .onSet(t => log.debug('Current temperature: ' + (t as number).toFixed(1)));
+    this.currentTemperature
+      .setProps({ perms: this.currentTemperature.props.perms.concat(Perms.PAIRED_WRITE) })
+      .onSet(this.updateCurrentTemperature.bind(this));
 
     this.state = this.thermostat.getCharacteristic(this.State);
     this.state.setProps({
@@ -156,42 +151,47 @@ class AdvancedThermostat implements AccessoryPlugin {
     // State
     this.loadState();
 
-    // Initialize
-    setTimeout(this.triggerCurrentTemperatureUpdate.bind(this), 10000);
+    // Set update timers
     setTimeout(() => {
-      setTimeout(this.runInterval.bind(this));
-      setInterval(this.runInterval.bind(this), this.interval * 60000);
-    }, 20000);
+      setTimeout(this.triggerCurrentTemperatureUpdate.bind(this));
+      setInterval(this.triggerCurrentTemperatureUpdate.bind(this), 60000);
+    }, 10000);
+    this.scheduledUpdate = setTimeout(this.update.bind(this), 20000);
 
-    api.on('shutdown', this.saveState.bind(this));
+    api.on('shutdown', this.shutdown.bind(this));
 
     this.log.debug('Advanced thermostat finished initializing!');
   }
 
   private loadState(): void {
-    let persistedState: { mode?: CharacteristicValue; targetTemperature?: CharacteristicValue; accumulatedError?: number; bias?: number }
-      | undefined;
+    let persistedState: AdvancedThermostatPersistedState | undefined;
     if (existsSync(this.persistPath)) {
       const rawFile = readFileSync(this.persistPath, 'utf8');
       persistedState = JSON.parse(rawFile);
     }
     this.mode.updateValue(persistedState?.mode ?? this.Mode.OFF);
     this.targetTemperature.updateValue(persistedState?.targetTemperature ?? 20);
-    this.bias = persistedState?.bias ?? this.cI * (persistedState?.accumulatedError ?? 0);
+    this.currentTemperature.updateValue(persistedState?.temperature ?? persistedState?.targetTemperature ?? 20);
+    this.updated = persistedState?.updated;
+    this.error = persistedState?.error;
+    this.bias = persistedState?.bias ?? 0;
+    this.budget = persistedState?.budget ?? 0;
     if (persistedState !== undefined) {
       this.log.debug('State loaded from: ' + this.persistPath);
     }
   }
 
   private saveState(): void {
-    writeFileSync(
-      this.persistPath,
-      JSON.stringify({
-        mode: this.mode.value,
-        targetTemperature: this.targetTemperature.value,
-        bias: this.bias,
-      }),
-    );
+    const persistedState: AdvancedThermostatPersistedState = {
+      mode: this.mode.value ?? undefined,
+      targetTemperature: this.targetTemperature.value ?? undefined,
+      temperature: this.currentTemperature.value ?? undefined,
+      updated: this.updated,
+      error: this.error,
+      bias: this.bias,
+      budget: this.budget,
+    };
+    writeFileSync(this.persistPath, JSON.stringify(persistedState));
     this.log.debug('State saved to: ' + this.persistPath);
   }
 
@@ -215,7 +215,7 @@ class AdvancedThermostat implements AccessoryPlugin {
     ];
   }
 
-  getModeName(state: CharacteristicValue | undefined | null): string {
+  private getModeName(state: CharacteristicValue | undefined | null): string {
     switch(state) {
       case this.Mode.OFF: return 'OFF';
       case this.Mode.HEAT: return 'HEAT';
@@ -225,7 +225,7 @@ class AdvancedThermostat implements AccessoryPlugin {
     }
   }
 
-  getStateName(state: CharacteristicValue | undefined | null): string {
+  private getStateName(state: CharacteristicValue | undefined | null): string {
     switch(state) {
       case this.State.OFF: return 'OFF';
       case this.State.HEAT: return 'HEAT';
@@ -234,35 +234,39 @@ class AdvancedThermostat implements AccessoryPlugin {
     }
   }
 
-  getActionString(action: { state: CharacteristicValue; duration: number }): string {
+  private getActionString(action: { state: CharacteristicValue; duration: number }): string {
     return this.getStateName(action.state) + ': ' + this.formatMinutes(action.duration);
   }
 
-  getAction(minutes: number): { state: CharacteristicValue; duration: number } {
+  private getAction(minutes: number): { state: CharacteristicValue; duration: number } {
     return {
       state: minutes >= 0 ? this.State.HEAT : this.State.COOL,
       duration: Math.abs(minutes),
     };
   }
 
-  getMinutesActionString(minutes: number): string {
+  private getMinutesActionString(minutes: number): string {
     return this.getActionString(this.getAction(minutes));
   }
 
-  limitNumber(number: number, limit: number): number {
+  private getRate(state: CharacteristicValue | undefined | null): number {
+    return state === this.State.HEAT ? 1 : (state === this.State.COOL ? -1 : 0);
+  }
+
+  private limitNumber(number: number, limit: number): number {
     const max = (this.mode.value === this.Mode.HEAT) || (this.mode.value === this.Mode.AUTO) ? limit : 0;
     const min = (this.mode.value === this.Mode.COOL) || (this.mode.value === this.Mode.AUTO) ? -limit : 0;
     return Math.max(Math.min(number, max), min);
   }
 
-  limitBottom(number: number) {
+  private limitBottom(number: number) {
     return this.mode.value === this.Mode.OFF ? 0 :
       this.mode.value === this.Mode.HEAT ? Math.max(number, 0) :
         this.mode.value === this.Mode.COOL ? Math.min(number, 0) :
           number;
   }
 
-  formatMinutes(totalMinutes: number): string {
+  private formatMinutes(totalMinutes: number): string {
     const hours = Math.trunc(totalMinutes / 60);
     const remainingMinutes = Math.abs(totalMinutes - hours * 60);
     const minutes = Math.trunc(remainingMinutes);
@@ -272,130 +276,168 @@ class AdvancedThermostat implements AccessoryPlugin {
            ('00' + seconds).slice(-2);
   }
 
-  toDateString(date: Date): string {
-    return date.getFullYear() + '-' + ('00' + (date.getMonth() + 1)).slice(-2) + '-' + ('00' + date.getDate()).slice(-2);
-  }
-
-  toTimeString(date: Date, includeOffset = true): string {
-    let offsetString = '';
-    if (includeOffset) {
-      const offset = date.getTimezoneOffset();
-      const offsetHours = Math.trunc(Math.abs(offset) / 60);
-      const offsetMinutes = Math.abs(offset) - 60 * offsetHours;
-      offsetString = ((offset === 0) ? 'Z' :
-        ((offset <= 0 ? '+' : '-') + ('00' + offsetHours).slice(-2) + ':' + ('00' + offsetMinutes).slice(-2)));
-    }
-    return ('00' + date.getHours()).slice(-2) + ':' + ('00' + date.getMinutes()).slice(-2) + ':' + ('00' + date.getSeconds()).slice(-2) +
-      offsetString;
-  }
-
-  toDateTimeString(date: Date, includeOffset = true): string {
-    return this.toDateString(date) + 'T' + this.toTimeString(date, includeOffset);
-  }
-
-  logBasicData(now: Date, nextState: CharacteristicValue): void {
-    if (this.state.value !== nextState) {
-      this.log.info('Change state to [' + this.getStateName(nextState) + ']');
+  private logBasicData(oldState: CharacteristicValue): void {
+    if (oldState !== this.state.value) {
+      this.log.info('Change state to [' + this.getStateName(this.state.value) + ']');
     }
     if (this.influxWriteApi && this.dataLogInfluxBasic) {
       const dataPoint = new Point('thermostat')
         .stringField('mode', this.getModeName(this.mode.value).toLowerCase())
         .floatField('target-temperature', this.targetTemperature.value)
         .floatField('current-temperature', this.currentTemperature.value)
-        .stringField('state', this.getStateName(nextState).toLowerCase())
-        .floatField('rate', nextState === this.State.HEAT ? 1 : (nextState === this.State.COOL ? -1 : 0))
-        .booleanField('heating', nextState === this.State.HEAT)
-        .booleanField('cooling', nextState === this.State.COOL)
-        .timestamp(now);
+        .stringField('state', this.getStateName(this.state.value).toLowerCase())
+        .floatField('rate', this.getRate(this.state.value))
+        .booleanField('heating', this.state.value === this.State.HEAT)
+        .booleanField('cooling', this.state.value === this.State.COOL)
+        .timestamp(this.updated);
       this.influxWriteApi.writePoint(dataPoint);
     }
   }
 
-  logPidData(now: Date, pid: number, p: number, i: number, d: number): void {
+  private logPidData(elapsed: number, budgetAddedD: number): void {
+    const p = this.cP * (this.error ?? 0);
+    const i = this.bias;
+    const d = elapsed > 0 ? budgetAddedD / elapsed : 0;
+    const pid = p + i + d;
     this.log.debug('PID: ' + pid.toFixed(2) + ' ' + '(P: ' + p.toFixed(3) + ', ' + 'I: ' + i.toFixed(3) + ', ' + 'D: ' + d.toFixed(3) + ') '
                    + '=> Budget: ' + this.getMinutesActionString(this.budget));
     if (this.influxWriteApi && this.dataLogInfluxPid) {
       const dataPoint = new Point('thermostat-pid')
         .floatField('pid', pid).floatField('p', p).floatField('i', i).floatField('d', d)
-        .timestamp(now);
+        .timestamp(this.updated);
       this.influxWriteApi.writePoint(dataPoint);
     }
   }
 
-  logBudgetData(now: Date, budget: number, inherited: number, added: number, used: number, discarded: number): void {
-    if (this.dataLogCsvDir && this.dataLogCsvDir.trim()) {
-      mkdirSync(this.dataLogCsvDir, {recursive: true});
-      if (this.dataLogCsvBudget) {
-        const fileName = `budget-${this.toDateString(now)}.csv`;
-        const filePath = path.join(this.dataLogCsvDir, fileName);
-        if (!existsSync(filePath)) {
-          appendFileSync(filePath, 'date,localdate,budget,inherited,added,used,discarded\n');
-        }
-        appendFileSync(filePath,
-          `${this.toDateTimeString(now)},${this.toDateTimeString(now, false)},${budget},${inherited},${added},${used},${discarded}\n`);
-      }
-    }
+  private logBudgetData(): void {
     if (this.influxWriteApi && this.dataLogInfluxBudget) {
       const dataPoint = new Point('thermostat-budget')
-        .floatField('budget', budget)
-        .floatField('budget-discarded', this.budgetDiscardedTotal)
-        .timestamp(now);
+        .floatField('budget', this.budget)
+        .timestamp(this.updated);
       this.influxWriteApi.writePoint(dataPoint);
     }
   }
 
-  runInterval() {
-    // P
-    const currentTemperature = (this.currentTemperature.value ?? this.targetTemperature.value) as number;
-    const error = this.targetTemperature.value as number - currentTemperature;
-    const proportionalFactor = this.cP * error;
-
-    // I
-    this.bias = this.limitNumber(this.bias + this.cI * error * this.interval, 1);
-    const integralFactor = this.bias;
-
-    // D
-    const differentialError = (error - (this.lastError ?? error)) / this.interval;
-    this.lastError = error;
-    const differentialFactor = this.cD * differentialError;
-
-    // PID Control equation
-    const controlFactor = proportionalFactor + integralFactor + differentialFactor;
-
-    // Compute budget
-    const budgetUsed = this.state.value === this.State.HEAT ? this.interval : this.state.value === this.State.COOL ? -this.interval : 0;
-    this.budget -= budgetUsed;
-    const budgetInherited = this.budgetFade ** this.interval * this.budget;
-    const budgetFaded = this.budget - budgetInherited;
-    const bugdetUnlimited = controlFactor * this.interval + budgetInherited;
-    this.budget = this.limitBottom(bugdetUnlimited);
-    const budgetDiscarded = bugdetUnlimited - this.budget + budgetFaded;
-    this.budgetDiscardedTotal = this.budgetFade ** this.interval * this.budgetDiscardedTotal + budgetDiscarded;
-    const budgetAdded = this.budget - budgetInherited;
-
-    // Determine action
-    const nextState = this.budget >= this.budgetThreshold ? this.State.HEAT :
-      this.budget <= -this.budgetThreshold ? this.State.COOL :
-        this.state.value === this.State.HEAT && this.budget < this.interval ? this.State.OFF :
-          this.state.value === this.State.COOL && this.budget > -this.interval ? this.State.OFF :
-            this.state.value ?? this.State.OFF;
-
-    // Log
-    const now = new Date();
-    this.logPidData(now, controlFactor, proportionalFactor, integralFactor, differentialFactor);
-    this.logBudgetData(now, this.budget, budgetInherited, budgetAdded, budgetUsed, budgetDiscarded);
-    this.logBasicData(now, nextState);
+  private logData(oldState: CharacteristicValue, elapsed: number, budgetAddedD: number): void {
+    this.logPidData(elapsed, budgetAddedD);
+    this.logBudgetData();
+    this.logBasicData(oldState);
     this.influxWriteApi?.flush()?.catch(r => this.log.error('Error writing to InfluxDB: ' + r));
-
-    // Execute
-    this.state.updateValue(nextState);
-
-    // Set trigger for temperature update 10s before next interval
-    setTimeout(this.triggerCurrentTemperatureUpdate.bind(this), this.interval * 60000 - 10000);
   }
 
-  triggerCurrentTemperatureUpdate(): void {
+  private computeDuration(): number {
+    const epsilon = 0.00000001;
+    const rate = this.getRate(this.state.value);
+    const limit = rate * this.budgetThreshold;
+    // Solve quadratic equation
+    // b(t) = l
+    // (cI * e * t + I0) * t + cP * e * t - r * t + b0 = l
+    // cI * e * t^2 + I0 * t + cP * e * t - r * t + b0 = l
+    // cI*e * t^2  +  (I0 + cP*e - r) * t  +  b0 - l = 0
+    const a = this.cI * (this.error ?? 0);
+    const b = this.bias + this.cP * (this.error ?? 0) - rate;
+    const c = this.budget - limit;
+    if (Math.abs(a) > epsilon) {
+      // t1,2 = (-b +/- sqrt(b^2 - 4ac)) / 2a
+      const underSqrt = b**2 - 4 * a * c;
+      if (underSqrt < 0) {
+        return this.budgetThreshold;
+      }
+      const sqrt = Math.sqrt(underSqrt);
+      const t1 = (-b - sqrt) / (2 * a);
+      const t2 = (-b + sqrt) / (2 * a);
+      return (t1 > 0 && t1 < this.budgetThreshold) ? t1 : (t2 > 0 && t2 < this.budgetThreshold) ? t2 : this.budgetThreshold;
+    } else if (Math.abs(b) > epsilon) {
+      // Linear special case
+      const t = -c / b;
+      return (t > 0 && t < this.budgetThreshold) ? t : this.budgetThreshold;
+    } else {
+      return this.budgetThreshold;
+    }
+  }
+
+  private update(shutdown = false) {
+    clearTimeout(this.scheduledUpdate);
+
+    // Temperatures and error
+    const targetTemperature = this.targetTemperature.value as number;
+    const currentTemperature = (this.currentTemperature.value ?? this.targetTemperature.value) as number;
+    const error = targetTemperature - currentTemperature;
+
+    // Time
+    const now = new Date();
+    const elapsed = this.updated ? (now.getTime() - this.updated.getTime()) / 60000 : undefined;
+
+    // Bias
+    const newBias = this.limitNumber(this.bias + this.cI * (this.error ?? 0) * (elapsed ?? 0), 1);
+
+    // Update budget
+    const budgetElapsed = elapsed ?? 0;
+    const budgetUsed = budgetElapsed * this.getRate(this.state.value);
+    const budgetAddedP = budgetElapsed * this.cP * (this.error ?? 0);
+    const budgetAddedI = budgetElapsed * (this.bias + newBias) / 2;
+    const budgetAddedD = this.error ? this.cD * (error - this.error) : 0;
+    const budgetAdded = budgetAddedP + budgetAddedI + budgetAddedD;
+    this.budget = this.limitBottom(this.budget + budgetAdded - budgetUsed);
+
+    // Determine next state
+    const oldState = this.state.value ?? this.State.OFF;
+    const nextState = shutdown ? this.State.OFF :
+      this.budget >= this.budgetThreshold ? this.State.HEAT :
+        this.budget <= -this.budgetThreshold ? this.State.COOL :
+          oldState === this.State.HEAT && this.budget <= 0 ? this.State.OFF :
+            oldState === this.State.COOL && this.budget >= 0 ? this.State.OFF :
+              oldState;
+
+    // Update state
+    this.state.updateValue(nextState);
+    this.updated = now;
+    this.error = error;
+    this.bias = newBias;
+
+    // Log
+    this.logData(oldState, elapsed ?? 0, budgetAddedD);
+
+    // Set next iteration
+    this.scheduledUpdate = setTimeout(this.update.bind(this), this.computeDuration() * 60000);
+  }
+
+  private triggerCurrentTemperatureUpdate(): void {
     this.trigger.getCharacteristic(hap.Characteristic.ProgrammableSwitchEvent)
       .sendEventNotification(hap.Characteristic.ProgrammableSwitchEvent.SINGLE_PRESS);
   }
+
+  private updateCurrentTemperature(newTemperature: CharacteristicValue) {
+    if (this.currentTemperature.value !== newTemperature) {
+      this.log.info('Current temperature changed to: ' + (newTemperature as number).toFixed(1));
+    } else {
+      this.log.debug('Current temperature: ' + (newTemperature as number).toFixed(1));
+    }
+    this.update();
+  }
+
+  private updateTargetTemperature(newTemperature: CharacteristicValue) {
+    if (this.currentTemperature.value !== newTemperature) {
+      this.log.info('Target temperature changed to: ' + (newTemperature as number).toFixed(1));
+      this.update();
+    } else {
+      this.log.debug('Target temperature: ' + (newTemperature as number).toFixed(1));
+    }
+    this.update();
+  }
+
+  private shutdown(): void {
+    this.update(true);
+    this.saveState();
+  }
 }
+
+type AdvancedThermostatPersistedState = {
+  updated?: Date;
+  mode?: CharacteristicValue;
+  targetTemperature?: CharacteristicValue;
+  temperature?: CharacteristicValue;
+  error?: number;
+  bias?: number;
+  budget?: number;
+};

@@ -10,13 +10,6 @@
           "type": "string",
           "required": true
         },
-        "interval": {
-          "title": "Interval",
-          "description": "Interval, in minutes",
-          "type": "number",
-          "default": 1,
-          "required": true
-        },
         "modes": {
           "title": "Supported Modes",
           "type": "array",
@@ -72,13 +65,6 @@
               "type": "number",
               "default": 5,
               "required": true
-            },
-            "budgetFade": {
-              "title": "Budget Fade",
-              "description": "Factor by which the heating/cooling time budget is reduced each minute.",
-              "type": "number",
-              "default": 0.99,
-              "required": false
             }
           }
         },
@@ -88,28 +74,6 @@
           "expandable": true,
           "expanded": false,
           "properties": {
-            "csv": {
-              "title": "CSV",
-              "type": "object",
-              "expandable": true,
-              "expanded": false,
-              "properties": {
-                "dir": {
-                  "title": "Directory",
-                  "description": "Directory where data is logged.",
-                  "type": "string",
-                  "required": false
-                },
-                "measurements": {
-                  "type": "array",
-                  "uniqueItems": true,
-                  "items": {
-                    "type": "string",
-                    "enum": [ "budget" ]
-                  }
-                }
-              }
-            },
             "influx": {
               "title": "Influx DB",
               "type": "object",
