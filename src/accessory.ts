@@ -111,8 +111,8 @@ class AdvancedThermostat implements AccessoryPlugin {
     this.influxDB = config.dataLog.influx.host ? new InfluxDB({ url: config.dataLog.influx.host, token: config.dataLog.influx.token})
       : undefined;
     this.influxWriteApi = this.influxDB?.getWriteApi(config.dataLog.influx.org, config.dataLog.influx.bucket, 's')
-      .useDefaultTags({ accessory: config.name })
-      .useDefaultTags(Object.fromEntries(config.dataLog.influx.tags.map((t: { name: string; value: string }) => [t.name, t.value])));
+      .useDefaultTags({ accessory: config.name,
+        ...Object.fromEntries(config.dataLog.influx.tags.map((t: { name: string; value: string }) => [t.name, t.value]))});
     this.dataLogInfluxBasic = config.dataLog.influx.measurements.includes('thermostat');
     this.dataLogInfluxPid = config.dataLog.influx.measurements.includes('thermostat-pid');
     this.dataLogInfluxBudget = config.dataLog.influx.measurements.includes('thermostat-budget');
