@@ -172,7 +172,7 @@ class AdvancedThermostat implements AccessoryPlugin {
     this.mode.updateValue(persistedState?.mode ?? this.Mode.OFF);
     this.targetTemperature.updateValue(persistedState?.targetTemperature ?? 20);
     this.currentTemperature.updateValue(persistedState?.temperature ?? persistedState?.targetTemperature ?? 20);
-    this.updated = persistedState?.updated;
+    this.updated = persistedState?.updated ? new Date(persistedState?.updated) : undefined;
     this.error = persistedState?.error;
     this.bias = persistedState?.bias ?? 0;
     this.budget = persistedState?.budget ?? 0;
@@ -186,7 +186,7 @@ class AdvancedThermostat implements AccessoryPlugin {
       mode: this.mode.value ?? undefined,
       targetTemperature: this.targetTemperature.value ?? undefined,
       temperature: this.currentTemperature.value ?? undefined,
-      updated: this.updated,
+      updated: this.updated?.toISOString(),
       error: this.error,
       bias: this.bias,
       budget: this.budget,
@@ -294,13 +294,14 @@ class AdvancedThermostat implements AccessoryPlugin {
     }
   }
 
-  private logPidData(elapsed: number, budgetAddedD: number): void {
+  private logPidData(elapsed: number, budgetAddedD: number, duration: number): void {
     const p = this.cP * (this.error ?? 0);
     const i = this.bias;
     const d = elapsed > 0 ? budgetAddedD / elapsed : 0;
     const pid = p + i + d;
     this.log.debug('PID: ' + pid.toFixed(2) + ' ' + '(P: ' + p.toFixed(3) + ', ' + 'I: ' + i.toFixed(3) + ', ' + 'D: ' + d.toFixed(3) + ') '
-                   + '=> Budget: ' + this.getMinutesActionString(this.budget));
+                   + '=> Budget: ' + this.getMinutesActionString(this.budget) + ' '
+                   + '=> Duration: ' + this.formatMinutes(duration));
     if (this.influxWriteApi && this.dataLogInfluxPid) {
       const dataPoint = new Point('thermostat-pid')
         .floatField('pid', pid).floatField('p', p).floatField('i', i).floatField('d', d)
@@ -318,8 +319,8 @@ class AdvancedThermostat implements AccessoryPlugin {
     }
   }
 
-  private logData(oldState: CharacteristicValue, elapsed: number, budgetAddedD: number): void {
-    this.logPidData(elapsed, budgetAddedD);
+  private logData(oldState: CharacteristicValue, elapsed: number, budgetAddedD: number, duration: number): void {
+    this.logPidData(elapsed, budgetAddedD, duration);
     this.logBudgetData();
     this.logBasicData(oldState);
     this.influxWriteApi?.flush()?.catch(r => this.log.error('Error writing to InfluxDB: ' + r));
@@ -328,7 +329,15 @@ class AdvancedThermostat implements AccessoryPlugin {
   private computeDuration(): number {
     const epsilon = 0.00000001;
     const rate = this.getRate(this.state.value);
-    const limit = rate * this.budgetThreshold;
+    let limit = [0];
+    if (this.state.value === this.State.OFF) {
+      switch (this.mode.value) {
+        case this.Mode.OFF: return this.budgetThreshold;
+        case this.Mode.HEAT: limit = [this.budgetThreshold]; break;
+        case this.Mode.COOL: limit = [-this.budgetThreshold]; break;
+        case this.Mode.AUTO: limit = [-this.budgetThreshold, this.budgetThreshold];
+      }
+    }
     // Solve quadratic equation
     // b(t) = l
     // (cI * e * t + I0) * t + cP * e * t - r * t + b0 = l
@@ -336,22 +345,21 @@ class AdvancedThermostat implements AccessoryPlugin {
     // cI*e * t^2  +  (I0 + cP*e - r) * t  +  b0 - l = 0
     const a = this.cI * (this.error ?? 0);
     const b = this.bias + this.cP * (this.error ?? 0) - rate;
-    const c = this.budget - limit;
+    const c = limit.map(l => this.budget - l);
     if (Math.abs(a) > epsilon) {
       // t1,2 = (-b +/- sqrt(b^2 - 4ac)) / 2a
-      const underSqrt = b**2 - 4 * a * c;
-      if (underSqrt < 0) {
-        return this.budgetThreshold;
-      }
-      const sqrt = Math.sqrt(underSqrt);
-      const t1 = (-b - sqrt) / (2 * a);
-      const t2 = (-b + sqrt) / (2 * a);
-      return (t1 > 0 && t1 < this.budgetThreshold) ? t1 : (t2 > 0 && t2 < this.budgetThreshold) ? t2 : this.budgetThreshold;
+      const underSqrt = c.map(c => b**2 - 4 * a * c);
+      const sqrt = underSqrt.filter(us => us >= 0).map(us => Math.sqrt(us));
+      const t = sqrt.flatMap(sq => [(-b - sq) / (2 * a), (-b + sq) / (2 * a)]);
+      this.log.debug(`a = ${a}, b = ${b}, c = ${c}, underSqrt = ${underSqrt}, t = ${t}.`);
+      return Math.min(...t.filter(t => t > 0), this.budgetThreshold);
     } else if (Math.abs(b) > epsilon) {
       // Linear special case
-      const t = -c / b;
-      return (t > 0 && t < this.budgetThreshold) ? t : this.budgetThreshold;
+      const t = c.map(c => -c / b);
+      this.log.debug(`a = ${a}, b = ${b}, c = ${c}, t = ${t}.`);
+      return Math.min(...t.filter(t => t > 0), this.budgetThreshold);
     } else {
+      this.log.debug(`a = ${a}, b = ${b}, c = ${c}`);
       return this.budgetThreshold;
     }
   }
@@ -396,10 +404,13 @@ class AdvancedThermostat implements AccessoryPlugin {
     this.bias = newBias;
 
     // Log
-    this.logData(oldState, elapsed ?? 0, budgetAddedD);
+    const duration = this.computeDuration();
+    this.logData(oldState, elapsed ?? 0, budgetAddedD, duration);
 
     // Set next iteration
-    this.scheduledUpdate = setTimeout(this.update.bind(this), this.computeDuration() * 60000);
+    if (!shutdown) {
+      this.scheduledUpdate = setTimeout(this.update.bind(this), duration * 60000);
+    }
   }
 
   private triggerCurrentTemperatureUpdate(): void {
@@ -433,7 +444,7 @@ class AdvancedThermostat implements AccessoryPlugin {
 }
 
 type AdvancedThermostatPersistedState = {
-  updated?: Date;
+  updated?: string;
   mode?: CharacteristicValue;
   targetTemperature?: CharacteristicValue;
   temperature?: CharacteristicValue;
