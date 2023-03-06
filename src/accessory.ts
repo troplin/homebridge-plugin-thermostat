@@ -66,6 +66,7 @@ class AdvancedThermostat implements AccessoryPlugin {
   private readonly cI: number;
   private readonly cD: number;
   private readonly budgetThreshold: number;
+  private readonly minimalUpdateInterval: number;
 
   // Data Logging
   private readonly influxDB?: InfluxDB;
@@ -101,6 +102,7 @@ class AdvancedThermostat implements AccessoryPlugin {
     this.cI = config.pid.cI;
     this.cD = config.pid.cD;
     this.budgetThreshold = config.modulation.budgetThreshold;
+    this.minimalUpdateInterval = config.dataLog?.minimalUpdateInterval ?? Infinity;
     this.influxDB = config.dataLog.influx.host ? new InfluxDB({ url: config.dataLog.influx.host, token: config.dataLog.influx.token})
       : undefined;
     this.influxWriteApi = this.influxDB?.getWriteApi(config.dataLog.influx.org, config.dataLog.influx.bucket, 's')
@@ -412,7 +414,8 @@ class AdvancedThermostat implements AccessoryPlugin {
 
     // Set next iteration
     if (!shutdown) {
-      this.scheduledUpdate = setTimeout(this.update.bind(this), Math.min(duration, this.budgetThreshold) * 60000);
+      const durationMs = Math.min(Math.min(duration, this.minimalUpdateInterval) * 60000, 2147483647); // Limit to max possible value
+      this.scheduledUpdate = setTimeout(this.update.bind(this), durationMs);
     }
   }
 
@@ -424,28 +427,28 @@ class AdvancedThermostat implements AccessoryPlugin {
   private updateMode(newMode: CharacteristicValue) {
     if (this.mode.value !== newMode) {
       this.log.info('Mode changed to: ' + this.getModeName(newMode));
+      setImmediate(this.update.bind(this));
     } else {
       this.log.debug('Mode: ' + this.getModeName(newMode));
     }
-    setImmediate(this.update.bind(this));
   }
 
   private updateCurrentTemperature(newTemperature: CharacteristicValue) {
     if (this.currentTemperature.value !== newTemperature) {
       this.log.info('Current temperature changed to: ' + (newTemperature as number).toFixed(1));
+      setImmediate(this.update.bind(this));
     } else {
       this.log.debug('Current temperature: ' + (newTemperature as number).toFixed(1));
     }
-    setImmediate(this.update.bind(this));
   }
 
   private updateTargetTemperature(newTemperature: CharacteristicValue) {
     if (this.targetTemperature.value !== newTemperature) {
       this.log.info('Target temperature changed to: ' + (newTemperature as number).toFixed(1));
+      setImmediate(this.update.bind(this));
     } else {
       this.log.debug('Target temperature: ' + (newTemperature as number).toFixed(1));
     }
-    setImmediate(this.update.bind(this));
   }
 
   private shutdown(): void {

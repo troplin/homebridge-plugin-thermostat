@@ -74,6 +74,12 @@
           "expandable": true,
           "expanded": false,
           "properties": {
+            "minimumUpdateInterval": {
+              "title": "Minimum Update Interval",
+              "description": "The minimum interval in minutes after which an update is performed even if not strictly necessary.",
+              "type": "number",
+              "required": false
+            },
             "influx": {
               "title": "Influx DB",
               "type": "object",
