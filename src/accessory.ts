@@ -269,6 +269,9 @@ class AdvancedThermostat implements AccessoryPlugin {
   }
 
   private formatMinutes(totalMinutes: number): string {
+    if (!isFinite(totalMinutes)) {
+      return totalMinutes.toString();
+    }
     const hours = Math.trunc(totalMinutes / 60);
     const remainingMinutes = Math.abs(totalMinutes - hours * 60);
     const minutes = Math.trunc(remainingMinutes);
@@ -354,15 +357,15 @@ class AdvancedThermostat implements AccessoryPlugin {
       const sqrt = underSqrt.filter(us => us >= 0).map(us => Math.sqrt(us));
       const t = sqrt.flatMap(sq => [(-b - sq) / (2 * a), (-b + sq) / (2 * a)]);
       this.log.debug(`a = ${a}, b = ${b}, c = ${c}, underSqrt = ${underSqrt}, t = ${t}.`);
-      return Math.min(...t.filter(t => t > 0), this.budgetThreshold);
+      return Math.min(...t.filter(t => t > 0), Infinity);
     } else if (Math.abs(b) > epsilon) {
       // Linear special case
       const t = c.map(c => -c / b);
       this.log.debug(`a = ${a}, b = ${b}, c = ${c}, t = ${t}.`);
-      return Math.min(...t.filter(t => t > 0), this.budgetThreshold);
+      return Math.min(...t.filter(t => t > 0), Infinity);
     } else {
       this.log.debug(`a = ${a}, b = ${b}, c = ${c}`);
-      return this.budgetThreshold;
+      return Infinity;
     }
   }
 
@@ -411,7 +414,7 @@ class AdvancedThermostat implements AccessoryPlugin {
 
     // Set next iteration
     if (!shutdown) {
-      this.scheduledUpdate = setTimeout(this.update.bind(this), duration * 60000);
+      this.scheduledUpdate = setTimeout(this.update.bind(this), Math.min(duration, this.budgetThreshold) * 60000);
     }
   }
 
