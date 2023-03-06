@@ -66,7 +66,7 @@ class AdvancedThermostat implements AccessoryPlugin {
   private readonly cI: number;
   private readonly cD: number;
   private readonly budgetThreshold: number;
-  private readonly minimalUpdateInterval: number;
+  private readonly minimumUpdateInterval: number;
 
   // Data Logging
   private readonly influxDB?: InfluxDB;
@@ -102,7 +102,7 @@ class AdvancedThermostat implements AccessoryPlugin {
     this.cI = config.pid.cI;
     this.cD = config.pid.cD;
     this.budgetThreshold = config.modulation.budgetThreshold;
-    this.minimalUpdateInterval = config.dataLog?.minimalUpdateInterval ?? Infinity;
+    this.minimumUpdateInterval = config.dataLog?.minimumUpdateInterval ?? Infinity;
     this.influxDB = config.dataLog.influx.host ? new InfluxDB({ url: config.dataLog.influx.host, token: config.dataLog.influx.token})
       : undefined;
     this.influxWriteApi = this.influxDB?.getWriteApi(config.dataLog.influx.org, config.dataLog.influx.bucket, 's')
@@ -414,7 +414,7 @@ class AdvancedThermostat implements AccessoryPlugin {
 
     // Set next iteration
     if (!shutdown) {
-      const durationMs = Math.min(Math.min(duration, this.minimalUpdateInterval) * 60000, 2147483647); // Limit to max possible value
+      const durationMs = Math.min(Math.min(duration, this.minimumUpdateInterval) * 60000, 2147483647); // Limit to max possible value
       this.scheduledUpdate = setTimeout(this.update.bind(this), durationMs);
     }
   }
