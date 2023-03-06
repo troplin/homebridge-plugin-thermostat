@@ -170,6 +170,7 @@ class AdvancedThermostat implements AccessoryPlugin {
       persistedState = JSON.parse(rawFile);
     }
     this.mode.updateValue(persistedState?.mode ?? this.Mode.OFF);
+    this.state.updateValue(persistedState?.state ?? this.State.OFF);
     this.targetTemperature.updateValue(persistedState?.targetTemperature ?? 20);
     this.currentTemperature.updateValue(persistedState?.temperature ?? persistedState?.targetTemperature ?? 20);
     this.updated = persistedState?.updated ? new Date(persistedState?.updated) : undefined;
@@ -184,6 +185,7 @@ class AdvancedThermostat implements AccessoryPlugin {
   private saveState(): void {
     const persistedState: AdvancedThermostatPersistedState = {
       mode: this.mode.value ?? undefined,
+      state: this.state.value ?? undefined,
       targetTemperature: this.targetTemperature.value ?? undefined,
       temperature: this.currentTemperature.value ?? undefined,
       updated: this.updated?.toISOString(),
@@ -428,7 +430,7 @@ class AdvancedThermostat implements AccessoryPlugin {
   }
 
   private updateTargetTemperature(newTemperature: CharacteristicValue) {
-    if (this.currentTemperature.value !== newTemperature) {
+    if (this.targetTemperature.value !== newTemperature) {
       this.log.info('Target temperature changed to: ' + (newTemperature as number).toFixed(1));
       this.update();
     } else {
@@ -438,7 +440,8 @@ class AdvancedThermostat implements AccessoryPlugin {
   }
 
   private shutdown(): void {
-    this.update(true);
+    //this.update(true);
+    clearTimeout(this.scheduledUpdate);
     this.saveState();
   }
 }
@@ -446,6 +449,7 @@ class AdvancedThermostat implements AccessoryPlugin {
 type AdvancedThermostatPersistedState = {
   updated?: string;
   mode?: CharacteristicValue;
+  state?: CharacteristicValue;
   targetTemperature?: CharacteristicValue;
   temperature?: CharacteristicValue;
   error?: number;
