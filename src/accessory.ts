@@ -125,8 +125,9 @@ class AdvancedThermostat implements AccessoryPlugin {
     if (config.modes.includes('heat') && config.modes.includes('cool')) {
       validModes.push(this.Mode.AUTO);
     }
-    this.mode = this.thermostat.getCharacteristic(this.Mode);
-    this.mode.setProps({ validValues: validModes });
+    this.mode = this.thermostat.getCharacteristic(this.Mode)
+      .setProps({ validValues: validModes })
+      .onSet(this.updateMode.bind(this));
 
     this.targetTemperature = this.thermostat.getCharacteristic(hap.Characteristic.TargetTemperature)
       .setProps({ minValue: 10, maxValue: 30})
@@ -423,13 +424,22 @@ class AdvancedThermostat implements AccessoryPlugin {
       .sendEventNotification(hap.Characteristic.ProgrammableSwitchEvent.SINGLE_PRESS);
   }
 
+  private updateMode(newMode: CharacteristicValue) {
+    if (this.mode.value !== newMode) {
+      this.log.info('Mode changed to: ' + this.getModeName(newMode));
+    } else {
+      this.log.debug('Mode: ' + this.getModeName(newMode));
+    }
+    setImmediate(this.update.bind(this));
+  }
+
   private updateCurrentTemperature(newTemperature: CharacteristicValue) {
     if (this.currentTemperature.value !== newTemperature) {
       this.log.info('Current temperature changed to: ' + (newTemperature as number).toFixed(1));
     } else {
       this.log.debug('Current temperature: ' + (newTemperature as number).toFixed(1));
     }
-    this.update();
+    setImmediate(this.update.bind(this));
   }
 
   private updateTargetTemperature(newTemperature: CharacteristicValue) {
@@ -438,7 +448,7 @@ class AdvancedThermostat implements AccessoryPlugin {
     } else {
       this.log.debug('Target temperature: ' + (newTemperature as number).toFixed(1));
     }
-    this.update();
+    setImmediate(this.update.bind(this));
   }
 
   private shutdown(): void {
