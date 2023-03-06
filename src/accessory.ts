@@ -432,7 +432,6 @@ class AdvancedThermostat implements AccessoryPlugin {
   private updateTargetTemperature(newTemperature: CharacteristicValue) {
     if (this.targetTemperature.value !== newTemperature) {
       this.log.info('Target temperature changed to: ' + (newTemperature as number).toFixed(1));
-      this.update();
     } else {
       this.log.debug('Target temperature: ' + (newTemperature as number).toFixed(1));
     }
