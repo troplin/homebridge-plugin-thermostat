@@ -340,7 +340,7 @@ class AdvancedThermostat implements AccessoryPlugin {
     let limit = [0];
     if (this.state.value === this.State.OFF) {
       switch (this.mode.value) {
-        case this.Mode.OFF: return this.budgetThreshold;
+        case this.Mode.OFF: return Infinity;
         case this.Mode.HEAT: limit = [this.budgetThreshold]; break;
         case this.Mode.COOL: limit = [-this.budgetThreshold]; break;
         case this.Mode.AUTO: limit = [-this.budgetThreshold, this.budgetThreshold];
