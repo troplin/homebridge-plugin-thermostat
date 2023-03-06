@@ -312,7 +312,7 @@ class AdvancedThermostat implements AccessoryPlugin {
                    + '=> Duration: ' + this.formatMinutes(duration));
     if (this.influxWriteApi && this.dataLogInfluxPid) {
       const dataPoint = new Point('thermostat-pid')
-        .floatField('pid', pid).floatField('p', p).floatField('i', i).floatField('d', d)
+        .floatField('pid', pid).floatField('pi', p + i).floatField('p', p).floatField('i', i).floatField('d', d)
         .timestamp(this.updated);
       this.influxWriteApi.writePoint(dataPoint);
     }
