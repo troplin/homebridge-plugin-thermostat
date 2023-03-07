@@ -286,7 +286,8 @@ class AdvancedThermostat implements AccessoryPlugin {
 
   private logBasicData(oldState: CharacteristicValue, duration: number): void {
     if (oldState !== this.state.value) {
-      this.log.info(`Change state to [${this.getStateName(this.state.value)}] for an expected duration of ${this.formatMinutes(duration)}`);
+      this.log.info(`Change state to [${this.getStateName(this.state.value)}] for an ` +
+        (isFinite(duration) ? `expected duration of ${this.formatMinutes(duration)}.` : 'unknown duration.'));
     }
     if (this.influxWriteApi && this.dataLogInfluxBasic) {
       const dataPoint = new Point('thermostat')
