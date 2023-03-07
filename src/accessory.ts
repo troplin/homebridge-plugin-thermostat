@@ -348,10 +348,10 @@ class AdvancedThermostat implements AccessoryPlugin {
     }
     // Solve quadratic equation
     // b(t) = l
-    // (cI * e * t + I0) * t + cP * e * t - r * t + b0 = l
-    // cI * e * t^2 + I0 * t + cP * e * t - r * t + b0 = l
-    // cI*e * t^2  +  (I0 + cP*e - r) * t  +  b0 - l = 0
-    const a = this.cI * (this.error ?? 0);
+    // ingetral_t(cI * e * t + I0) + cP * e * t - r * t + b0 = l
+    // 0.5 * cI * e * t^2 + I0 * t + cP * e * t - r * t + b0 = l
+    // 0.5*cI*e * t^2  +  (I0 + cP*e - r) * t  +  b0 - l = 0
+    const a = 0.5 * this.cI * (this.error ?? 0);
     const b = this.bias + this.cP * (this.error ?? 0) - rate;
     const c = limit.map(l => this.budget - l);
     if (Math.abs(a) > epsilon) {
