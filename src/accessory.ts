@@ -342,7 +342,6 @@ class AdvancedThermostat implements AccessoryPlugin {
     this.logBudgetData();
     this.logBasicData(oldState, duration, logMessage);
     this.logPidData(elapsed, budgetAddedD, duration);
-    this.influxWriteApi?.flush()?.catch(r => this.log.error('Error writing to InfluxDB: ' + r));
   }
 
   private computeDuration(): number {

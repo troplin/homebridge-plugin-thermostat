@@ -75,8 +75,8 @@
           "expanded": false,
           "properties": {
             "minimumUpdateInterval": {
-              "title": "Minimum Update Interval",
-              "description": "The minimum interval in minutes after which an update is performed even if not strictly necessary.",
+              "title": "Maximum Data Point Interval",
+              "description": "The maximum interval in minutes between two data points.",
               "type": "number",
               "required": false
             },
