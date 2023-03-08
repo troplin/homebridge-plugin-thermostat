@@ -360,15 +360,15 @@ class AdvancedThermostat implements AccessoryPlugin {
       const underSqrt = c.map(c => b**2 - 4 * a * c);
       const sqrt = underSqrt.filter(us => us >= 0).map(us => Math.sqrt(us));
       const t = sqrt.flatMap(sq => [(-b - sq) / (2 * a), (-b + sq) / (2 * a)]);
-      this.log.debug(`Quadratic: a = ${a}, b = ${b}, c = ${c}, underSqrt = ${underSqrt}, t = ${t}.`);
+      //this.log.debug(`Quadratic: a = ${a}, b = ${b}, c = ${c}, underSqrt = ${underSqrt}, t = ${t}.`);
       return Math.min(...t.filter(t => t > 0), Infinity);
     } else if (Math.abs(b) > epsilon) {
       // Linear special case
       const t = c.map(c => -c / b);
-      this.log.debug(`Linear: a = ${a}, b = ${b}, c = ${c}, t = ${t}.`);
+      //this.log.debug(`Linear: a = ${a}, b = ${b}, c = ${c}, t = ${t}.`);
       return Math.min(...t.filter(t => t > 0), Infinity);
     } else {
-      this.log.debug(`Infinite: a = ${a}, b = ${b}, c = ${c}`);
+      //this.log.debug(`Infinite: a = ${a}, b = ${b}, c = ${c}`);
       return Infinity;
     }
   }
