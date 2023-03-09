@@ -297,11 +297,12 @@ class AdvancedThermostat implements AccessoryPlugin {
     if (oldState !== this.state.value || logMessage) {
       const suffix = 'for an ' + (isFinite(duration) ? `expected duration of ${this.formatMinutes(duration)}.` : 'unknown duration.');
       if (oldState !== this.state.value && logMessage) {
-        this.log.info(`${logMessage}, change state ${this.formatValueChange(oldState, this.state.value, this.getStateName)} ` + suffix);
+        this.log.info(`${logMessage}, change state ${this.formatValueChange(oldState, this.state.value, this.getStateName.bind(this))} `
+        + suffix);
       } else if (logMessage) {
         this.log.info(`${logMessage}, continue with ${this.getStateName(this.state.value)} ` + suffix);
       } else {
-        this.log.info(`Change state ${this.formatValueChange(oldState, this.state.value, this.getStateName)} ` + suffix);
+        this.log.info(`Change state ${this.formatValueChange(oldState, this.state.value, this.getStateName.bind(this))} ` + suffix);
       }
     }
     if (this.influxWriteApi && this.dataLogInfluxBasic) {
@@ -444,7 +445,7 @@ class AdvancedThermostat implements AccessoryPlugin {
 
   private updateMode(newMode: CharacteristicValue) {
     if (this.mode.value !== newMode) {
-      setImmediate(this.update.bind(this, 'Mode changed' + this.formatValueChange(this.mode.value, newMode, this.getModeName)));
+      setImmediate(this.update.bind(this, 'Mode changed' + this.formatValueChange(this.mode.value, newMode, this.getModeName.bind(this))));
     } else {
       this.log.debug('Mode: ' + this.getModeName(newMode));
     }
@@ -453,7 +454,7 @@ class AdvancedThermostat implements AccessoryPlugin {
   private updateCurrentTemperature(newTemperature: CharacteristicValue) {
     if (this.currentTemperature.value !== newTemperature) {
       setImmediate(this.update.bind(this, 'Current temperature changed ' + this.formatValueChange(this.currentTemperature.value,
-        newTemperature, this.formatTemperature)));
+        newTemperature, this.formatTemperature.bind(this))));
     } else {
       this.log.debug('Current temperature: ' + this.formatTemperature(newTemperature));
     }
@@ -462,7 +463,7 @@ class AdvancedThermostat implements AccessoryPlugin {
   private updateTargetTemperature(newTemperature: CharacteristicValue) {
     if (this.targetTemperature.value !== newTemperature) {
       setImmediate(this.update.bind(this, 'Target temperature changed ' + this.formatValueChange(this.targetTemperature.value,
-        newTemperature, this.formatTemperature)));
+        newTemperature, this.formatTemperature.bind(this))));
     } else {
       this.log.debug('Target temperature: ' + this.formatTemperature(newTemperature));
     }
