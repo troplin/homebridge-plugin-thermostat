@@ -264,10 +264,10 @@ class AdvancedThermostat implements AccessoryPlugin {
     return Math.max(Math.min(number, max), min);
   }
 
-  private limitBottom(number: number) {
-    return this.mode.value === this.Mode.OFF ? 0 :
-      this.mode.value === this.Mode.HEAT ? Math.max(number, 0) :
-        this.mode.value === this.Mode.COOL ? Math.min(number, 0) :
+  private limitBottom(number: number, limit = 0) {
+    return this.mode.value === this.Mode.OFF ? limit :
+      this.mode.value === this.Mode.HEAT ? Math.max(number, limit) :
+        this.mode.value === this.Mode.COOL ? Math.min(number, limit) :
           number;
   }
 
@@ -405,12 +405,12 @@ class AdvancedThermostat implements AccessoryPlugin {
 
     // Update budget
     const budgetElapsed = elapsed ?? 0;
-    const budgetUsed = budgetElapsed * this.getRate(this.state.value);
-    const budgetAddedP = budgetElapsed * this.cP * (this.error ?? 0);
-    const budgetAddedI = budgetElapsed * (this.bias + newBias) / 2;
-    const budgetAddedD = (this.error !== undefined) ? this.cD * (error - this.error) : 0;
-    const budgetAdded = budgetAddedP + budgetAddedI + budgetAddedD;
-    this.budget = this.limitBottom(this.budget + budgetAdded - budgetUsed);
+    this.budget -= budgetElapsed * this.getRate(this.state.value); // Used
+    const budgetLimitP = -this.limitBottom(this.budget); // Limit it s.t. it doesn't drive the budget more negative.
+    const budgetAddedP = this.limitBottom(budgetElapsed * this.cP * (this.error ?? 0), budgetLimitP);
+    const budgetAddedI = budgetElapsed * (this.bias + newBias) / 2; // Can never be negative (bias is limited)
+    const budgetAddedD = (this.error !== undefined) ? this.cD * (error - this.error) : 0; // Allow budget to become negative
+    this.budget += budgetAddedP + budgetAddedI + budgetAddedD;
 
     // Determine next state
     const oldState = this.state.value ?? this.State.OFF;
