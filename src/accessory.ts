@@ -408,7 +408,7 @@ class AdvancedThermostat implements AccessoryPlugin {
     const budgetUsed = budgetElapsed * this.getRate(this.state.value);
     const budgetAddedP = budgetElapsed * this.cP * (this.error ?? 0);
     const budgetAddedI = budgetElapsed * (this.bias + newBias) / 2;
-    const budgetAddedD = this.error ? this.cD * (error - this.error) : 0;
+    const budgetAddedD = (this.error !== undefined) ? this.cD * (error - this.error) : 0;
     const budgetAdded = budgetAddedP + budgetAddedI + budgetAddedD;
     this.budget = this.limitBottom(this.budget + budgetAdded - budgetUsed);
 
