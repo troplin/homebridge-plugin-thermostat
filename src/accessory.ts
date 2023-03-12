@@ -14,7 +14,9 @@ import path from 'path';
 import {
   InfluxDB,
   Point,
+  setLogger,
   WriteApi,
+  WriteOptions,
 } from '@influxdata/influxdb-client';
 
 /*
@@ -103,6 +105,14 @@ class AdvancedThermostat implements AccessoryPlugin {
     this.cD = config.pid.cD;
     this.budgetThreshold = config.modulation.budgetThreshold;
     this.minimumUpdateInterval = config.dataLog?.minimumUpdateInterval ?? Infinity;
+    setLogger({
+      warn(message: string, err: Error) {
+        log.warn(message + ' Error: ' + err.message);
+      },
+      error(message: string, err: Error) {
+        log.error(message + ' Error: ' + err.message);
+      },
+    });
     this.influxDB = config.dataLog.influx.host ? new InfluxDB({ url: config.dataLog.influx.host, token: config.dataLog.influx.token})
       : undefined;
     this.influxWriteApi = this.influxDB?.getWriteApi(config.dataLog.influx.org, config.dataLog.influx.bucket, 's')
