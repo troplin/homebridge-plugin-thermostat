@@ -463,7 +463,7 @@ class AdvancedThermostat implements AccessoryPlugin {
 
   private updateMode(newMode: CharacteristicValue) {
     if (this.mode.value !== newMode) {
-      setImmediate(this.update.bind(this, 'Mode changed' + this.formatValueChange(this.mode.value, newMode, this.getModeName.bind(this))));
+      setImmediate(this.update.bind(this, 'Mode changed ' + this.formatValueChange(this.mode.value, newMode, this.getModeName.bind(this))));
     } else {
       this.log.debug('Mode: ' + this.getModeName(newMode));
     }
