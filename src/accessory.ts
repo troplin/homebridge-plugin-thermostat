@@ -398,6 +398,14 @@ class AdvancedThermostat implements AccessoryPlugin {
     }
   }
 
+  private canHeat(): boolean {
+    return this.mode.value === this.Mode.HEAT || this.mode.value === this.Mode.AUTO;
+  }
+
+  private canCool(): boolean {
+    return this.mode.value === this.Mode.COOL || this.mode.value === this.Mode.AUTO;
+  }
+
   private update(logMessage?: string, shutdown = false) {
     clearTimeout(this.scheduledUpdate);
 
@@ -425,10 +433,10 @@ class AdvancedThermostat implements AccessoryPlugin {
     // Determine next state
     const oldState = this.state.value ?? this.State.OFF;
     const nextState = shutdown ? this.State.OFF :
-      this.budget >= this.budgetThreshold ? this.State.HEAT :
-        this.budget <= -this.budgetThreshold ? this.State.COOL :
-          oldState === this.State.HEAT && this.budget <= 0 ? this.State.OFF :
-            oldState === this.State.COOL && this.budget >= 0 ? this.State.OFF :
+      (this.canHeat() && (this.budget >= this.budgetThreshold)) ? this.State.HEAT :
+        (this.canCool() && (this.budget <= -this.budgetThreshold)) ? this.State.COOL :
+          oldState === this.State.HEAT && (this.budget <= 0 || !this.canHeat()) ? this.State.OFF :
+            oldState === this.State.COOL && (this.budget >= 0 || !this.canCool()) ? this.State.OFF :
               oldState;
 
     // Update state
