@@ -16,7 +16,6 @@ import {
   Point,
   setLogger,
   WriteApi,
-  WriteOptions,
 } from '@influxdata/influxdb-client';
 
 /*
@@ -79,7 +78,6 @@ class AdvancedThermostat implements AccessoryPlugin {
 
   // Services
   private readonly thermostat: Service;
-  private readonly trigger: Service;
   private readonly information: Service;
 
   // Characteristics
@@ -155,21 +153,11 @@ class AdvancedThermostat implements AccessoryPlugin {
       validValues: [this.State.OFF].concat(config.modes.map((m: string) => m === 'heat' ? this.State.HEAT : this.State.COOL)),
     });
 
-    // create trigger service
-    this.trigger = new hap.Service.StatelessProgrammableSwitch();
-
-    this.trigger.getCharacteristic(hap.Characteristic.ProgrammableSwitchEvent)
-      .setProps({ validValues: [hap.Characteristic.ProgrammableSwitchEvent.SINGLE_PRESS] });
-
     // State
     this.loadState();
 
-    // Set update timers
-    setTimeout(() => {
-      setTimeout(this.triggerCurrentTemperatureUpdate.bind(this));
-      setInterval(this.triggerCurrentTemperatureUpdate.bind(this), 60000);
-    }, 10000);
-    this.scheduledUpdate = setTimeout(this.update.bind(this, 'Startup complete'), 20000);
+    // Set update timer
+    this.scheduledUpdate = setTimeout(this.update.bind(this, 'Startup complete'), 60000);
 
     api.on('shutdown', this.shutdown.bind(this));
 
@@ -226,7 +214,6 @@ class AdvancedThermostat implements AccessoryPlugin {
     return [
       this.information,
       this.thermostat,
-      this.trigger,
     ];
   }
 
@@ -454,11 +441,6 @@ class AdvancedThermostat implements AccessoryPlugin {
       const durationMs = Math.min(Math.min(duration, this.minimumUpdateInterval) * 60000, 2147483647); // Limit to max possible value
       this.scheduledUpdate = setTimeout(this.update.bind(this), durationMs);
     }
-  }
-
-  private triggerCurrentTemperatureUpdate(): void {
-    this.trigger.getCharacteristic(hap.Characteristic.ProgrammableSwitchEvent)
-      .sendEventNotification(hap.Characteristic.ProgrammableSwitchEvent.SINGLE_PRESS);
   }
 
   private updateMode(newMode: CharacteristicValue) {
