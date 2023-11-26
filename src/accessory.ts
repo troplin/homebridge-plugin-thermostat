@@ -403,18 +403,24 @@ class AdvancedThermostat implements AccessoryPlugin {
 
     // Time
     const now = new Date();
-    const elapsed = this.updated ? (now.getTime() - this.updated.getTime()) / 60000 : undefined;
+    const elapsedMinutes = this.updated ? (now.getTime() - this.updated.getTime()) / 60000 : undefined;
 
     // Bias
-    const newBias = this.limitNumber(this.bias + this.cI * (this.error ?? 0) * (elapsed ?? 0), 1);
+    const newBiasUnlimited = this.bias + this.cI * (this.error ?? 0) * (elapsedMinutes ?? 0);
+    const newBias = this.limitNumber(newBiasUnlimited, 1);
+
+    // Compensation for limited heating cooling capacity:
+    // Only the duration where the bias is not over/under limits is counted for P and I calculation.
+    let elapsedMinutesUnLimited = elapsedMinutes ?? 0;
+    if (newBias !== newBiasUnlimited) {
+      elapsedMinutesUnLimited = (newBias - this.bias) / (this.cI * (this.error ?? 0)); // CI * error is guaranteed != 0
+    }
 
     // Update budget
-    const budgetElapsed = elapsed ?? 0;
-    this.budget -= budgetElapsed * this.getRate(this.state.value); // Used
-    const budgetLimitP = -this.limitBottom(this.budget); // Limit it s.t. it doesn't drive the budget more negative.
-    const budgetAddedP = this.limitBottom(budgetElapsed * this.cP * (this.error ?? 0), budgetLimitP);
-    const budgetAddedI = budgetElapsed * (this.bias + newBias) / 2; // Can never be negative (bias is limited)
-    const budgetAddedD = (this.error !== undefined) ? this.cD * (error - this.error) : 0; // Allow budget to become negative
+    this.budget -= (elapsedMinutes ?? 0) * this.getRate(this.state.value); // Used
+    const budgetAddedP = elapsedMinutesUnLimited * this.cP * (this.error ?? 0);
+    const budgetAddedI = elapsedMinutesUnLimited * (this.bias + newBias) / 2;
+    const budgetAddedD = (this.error !== undefined) ? this.cD * (error - this.error) : 0;
     this.budget += budgetAddedP + budgetAddedI + budgetAddedD;
 
     // Determine next state
@@ -434,7 +440,7 @@ class AdvancedThermostat implements AccessoryPlugin {
 
     // Log
     const duration = this.computeDuration();
-    this.logData(oldState, elapsed ?? 0, budgetAddedD, duration, logMessage);
+    this.logData(oldState, elapsedMinutes ?? 0, budgetAddedD, duration, logMessage);
 
     // Set next iteration
     if (!shutdown) {
