@@ -63,6 +63,8 @@ class AdvancedThermostat implements AccessoryPlugin {
 
   // Configuration
   private readonly name: string;
+  private readonly heatingPower?: number;
+  private readonly coolingPower?: number;
   private readonly cP: number;
   private readonly cI: number;
   private readonly cD: number;
@@ -98,6 +100,8 @@ class AdvancedThermostat implements AccessoryPlugin {
 
     // Configuration
     this.name = config.name;
+    this.heatingPower = config.power?.heat;
+    this.coolingPower = config.power?.cool;
     this.cP = config.pid.cP;
     this.cI = config.pid.cI;
     this.cD = config.pid.cD;
@@ -255,6 +259,11 @@ class AdvancedThermostat implements AccessoryPlugin {
     return state === this.State.HEAT ? 1 : (state === this.State.COOL ? -1 : 0);
   }
 
+  private getPower(state: CharacteristicValue | undefined | null): number | undefined {
+    return state === this.State.HEAT ? this.heatingPower
+      : (state === this.State.COOL ? (this.coolingPower === undefined ? undefined : -this.coolingPower) : 0);
+  }
+
   private limitNumber(number: number, limit: number): number {
     const max = (this.mode.value === this.Mode.HEAT) || (this.mode.value === this.Mode.AUTO) ? limit : 0;
     const min = (this.mode.value === this.Mode.COOL) || (this.mode.value === this.Mode.AUTO) ? -limit : 0;
@@ -311,6 +320,7 @@ class AdvancedThermostat implements AccessoryPlugin {
         .floatField('rate', this.getRate(this.state.value))
         .booleanField('heating', this.state.value === this.State.HEAT)
         .booleanField('cooling', this.state.value === this.State.COOL)
+        .floatField('power', this.getPower(this.state.value))
         .timestamp(this.updated);
       this.influxWriteApi.writePoint(dataPoint);
     }
@@ -327,6 +337,9 @@ class AdvancedThermostat implements AccessoryPlugin {
     if (this.influxWriteApi && this.dataLogInfluxPid) {
       const dataPoint = new Point('thermostat-pid')
         .floatField('pid', pid).floatField('pi', p + i).floatField('p', p).floatField('i', i).floatField('d', d)
+        // In Watts:
+        .floatField('i-w', this.heatingPower === undefined ? undefined : (this.bias * this.heatingPower))
+        .floatField('p-w', this.heatingPower === undefined ? undefined : (p * this.heatingPower))
         .timestamp(this.updated);
       this.influxWriteApi.writePoint(dataPoint);
     }
@@ -336,6 +349,9 @@ class AdvancedThermostat implements AccessoryPlugin {
     if (this.influxWriteApi && this.dataLogInfluxBudget) {
       const dataPoint = new Point('thermostat-budget')
         .floatField('budget', this.budget)
+        // Budget is in minutes of heating, multiplying by power and 60s gives Joules.
+        // Ignoring cooling for now.
+        .floatField('budget-j', this.heatingPower === undefined ? undefined : (this.heatingPower * this.budget * 60))
         .timestamp(this.updated);
       this.influxWriteApi.writePoint(dataPoint);
     }

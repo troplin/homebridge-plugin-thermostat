@@ -24,6 +24,24 @@
           "default": [ "heat" ],
           "required": true
         },
+        "power" : {
+          "title": "Power",
+          "type": "object",
+          "expandable": true,
+          "expanded": false,
+          "properties": {
+            "heat": {
+              "title": "Heating",
+              "description": "Power available for heating",
+              "type": "number"
+            },
+            "cool": {
+              "title": "Cooling",
+              "description": "Power available for cooling",
+              "type": "number"
+            }
+          }
+        },
         "pid": {
           "title": "PID Control",
           "type": "object",

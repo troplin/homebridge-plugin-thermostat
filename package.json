@@ -2,7 +2,7 @@
   "private": true,
   "displayName": "Advanced Thermostat",
   "name": "homebridge-advanced-thermostat",
-  "version": "0.17.1",
+  "version": "0.17.2",
   "description": "Homebridge plugin providing an advanced dummy thermostat",
   "main": "dist/accessory.js",
   "scripts": {
