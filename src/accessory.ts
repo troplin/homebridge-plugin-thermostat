@@ -427,7 +427,8 @@ class AdvancedThermostat implements AccessoryPlugin {
     // Only the duration where the bias is not over/under limits is counted for P and I calculation.
     let elapsedSecondsUnLimited = elapsedSeconds ?? 0;
     if (newBiasW !== newBiasWUnlimited) {
-      elapsedSecondsUnLimited = (newBiasW - this.biasW) / (this.cI * (this.error ?? 0)); // CI * error is guaranteed != 0
+      // CI * compensation * error is guaranteed != 0
+      elapsedSecondsUnLimited = (newBiasW - this.biasW) / (this.cI * oldCompensationFactor * (this.error ?? 0));
     }
 
     // Update budget
