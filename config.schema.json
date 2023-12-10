@@ -10,20 +10,6 @@
           "type": "string",
           "required": true
         },
-        "modes": {
-          "title": "Supported Modes",
-          "type": "array",
-          "uniqueItems": true,
-          "items": {
-            "type": "string",
-            "enum": [
-              "heat",
-              "cool"
-            ]
-          },
-          "default": [ "heat" ],
-          "required": true
-        },
         "power" : {
           "title": "Power",
           "type": "object",
@@ -32,13 +18,16 @@
           "properties": {
             "heat": {
               "title": "Heating",
-              "description": "Power available for heating",
-              "type": "number"
+              "description": "Power available for heating [W]",
+              "type": "number",
+              "required": true
             },
             "cool": {
               "title": "Cooling",
-              "description": "Power available for cooling",
-              "type": "number"
+              "description": "Power available for cooling [W]",
+              "type": "number",
+              "default": 0,
+              "required": true
             }
           }
         },
@@ -50,23 +39,23 @@
           "properties": {
             "cP": {
               "title": "P",
-              "description": "Proportional coefficient",
+              "description": "Proportional coefficient [W / °C]",
               "type": "number",
-              "default": 0.2,
+              "default": 1000,
               "required": true
             },
             "cI": {
               "title": "I",
-              "description": "Integral coefficient",
+              "description": "Integral coefficient [W / s°C]",
               "type": "number",
-              "default": 0.01,
+              "default": 0.03,
               "required": true
             },
             "cD": {
               "title": "D",
-              "description": "Differential coefficient",
+              "description": "Differential coefficient [J / °C]",
               "type": "number",
-              "default": 1,
+              "default": 700000,
               "required": true
             }
           }
@@ -79,9 +68,9 @@
           "properties": {
             "budgetThreshold": {
               "title": "Budget Threshold",
-              "description": "The amount of heating/cooling budget in minutes required before turning on heating/cooling.",
+              "description": "The amount of heating/cooling budget required before turning on heating/cooling. [J]",
               "type": "number",
-              "default": 5,
+              "default": 75000,
               "required": true
             }
           }
@@ -94,7 +83,7 @@
           "properties": {
             "minimumUpdateInterval": {
               "title": "Maximum Data Point Interval",
-              "description": "The maximum interval in minutes between two data points.",
+              "description": "The maximum interval between two data points. [s]",
               "type": "number",
               "required": false
             },

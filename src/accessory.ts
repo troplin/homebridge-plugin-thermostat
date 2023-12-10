@@ -63,13 +63,13 @@ class AdvancedThermostat implements AccessoryPlugin {
 
   // Configuration
   private readonly name: string;
-  private readonly heatingPower?: number;
-  private readonly coolingPower?: number;
+  private readonly heatingPower: number;
+  private readonly coolingPower: number;
   private readonly cP: number;
   private readonly cI: number;
   private readonly cD: number;
-  private readonly budgetThreshold: number;
-  private readonly minimumUpdateInterval: number;
+  private readonly budgetThresholdJ: number;
+  private readonly minimumUpdateIntervalS: number;
 
   // Data Logging
   private readonly influxDB?: InfluxDB;
@@ -92,21 +92,21 @@ class AdvancedThermostat implements AccessoryPlugin {
   private scheduledUpdate: NodeJS.Timeout;
   private updated?: Date;
   private error?: number;
-  private bias = 0;
-  private budget = 0;
+  private biasW = 0;
+  private budgetJ = 0;
 
   constructor(log: Logging, config: AccessoryConfig, api: API) {
     this.log = log;
 
     // Configuration
     this.name = config.name;
-    this.heatingPower = config.power?.heat;
-    this.coolingPower = config.power?.cool;
+    this.heatingPower = config.power?.heat ?? 0;
+    this.coolingPower = config.power?.cool ?? 0;
     this.cP = config.pid.cP;
     this.cI = config.pid.cI;
     this.cD = config.pid.cD;
-    this.budgetThreshold = config.modulation.budgetThreshold;
-    this.minimumUpdateInterval = config.dataLog?.minimumUpdateInterval ?? Infinity;
+    this.budgetThresholdJ = config.modulation.budgetThreshold;
+    this.minimumUpdateIntervalS = config.dataLog?.minimumUpdateInterval ?? Infinity;
     setLogger({
       warn(message: string, err: Error) {
         log.warn(message + ' Error: ' + err.message);
@@ -135,8 +135,15 @@ class AdvancedThermostat implements AccessoryPlugin {
     // create thermostat service
     this.thermostat = new hap.Service.Thermostat(this.name);
 
-    const validModes = [this.Mode.OFF].concat(config.modes.map((m: string) => m === 'heat' ? this.Mode.HEAT : this.Mode.COOL));
-    if (config.modes.includes('heat') && config.modes.includes('cool')) {
+    // Modes
+    const validModes = [this.Mode.OFF];
+    if (this.heatingPower > 0) {
+      validModes.push(this.Mode.HEAT);
+    }
+    if (this.coolingPower > 0) {
+      validModes.push(this.Mode.COOL);
+    }
+    if (this.heatingPower > 0 && this.coolingPower > 0) {
       validModes.push(this.Mode.AUTO);
     }
     this.mode = this.thermostat.getCharacteristic(this.Mode)
@@ -152,10 +159,16 @@ class AdvancedThermostat implements AccessoryPlugin {
       .setProps({ perms: this.currentTemperature.props.perms.concat(Perms.PAIRED_WRITE) })
       .onSet(this.updateCurrentTemperature.bind(this));
 
-    this.state = this.thermostat.getCharacteristic(this.State);
-    this.state.setProps({
-      validValues: [this.State.OFF].concat(config.modes.map((m: string) => m === 'heat' ? this.State.HEAT : this.State.COOL)),
-    });
+    // States
+    const validStates = [this.State.OFF];
+    if (this.heatingPower > 0) {
+      validStates.push(this.Mode.HEAT);
+    }
+    if (this.coolingPower > 0) {
+      validStates.push(this.Mode.COOL);
+    }
+    this.state = this.thermostat.getCharacteristic(this.State)
+      .setProps({ validValues: validStates });
 
     // State
     this.loadState();
@@ -180,8 +193,8 @@ class AdvancedThermostat implements AccessoryPlugin {
     this.currentTemperature.updateValue(persistedState?.temperature ?? persistedState?.targetTemperature ?? 20);
     this.updated = persistedState?.updated ? new Date(persistedState?.updated) : undefined;
     this.error = persistedState?.error;
-    this.bias = persistedState?.bias ?? 0;
-    this.budget = persistedState?.budget ?? 0;
+    this.biasW = persistedState?.biasW ?? ((persistedState?.bias ?? 0) * this.heatingPower);
+    this.budgetJ = persistedState?.budgetJ ?? ((persistedState?.budget ?? 0) * this.heatingPower * 60);
     if (persistedState !== undefined) {
       this.log.debug('State loaded from: ' + this.persistPath);
     }
@@ -195,8 +208,8 @@ class AdvancedThermostat implements AccessoryPlugin {
       temperature: this.currentTemperature.value ?? undefined,
       updated: this.updated?.toISOString(),
       error: this.error,
-      bias: this.bias,
-      budget: this.budget,
+      biasW: this.biasW,
+      budgetJ: this.budgetJ,
     };
     writeFileSync(this.persistPath, JSON.stringify(persistedState));
     this.log.debug('State saved to: ' + this.persistPath);
@@ -240,51 +253,28 @@ class AdvancedThermostat implements AccessoryPlugin {
     }
   }
 
-  private getActionString(action: { state: CharacteristicValue; duration: number }): string {
-    return this.getStateName(action.state) + ': ' + this.formatMinutes(action.duration);
-  }
-
-  private getAction(minutes: number): { state: CharacteristicValue; duration: number } {
-    return {
-      state: minutes >= 0 ? this.State.HEAT : this.State.COOL,
-      duration: Math.abs(minutes),
-    };
-  }
-
-  private getMinutesActionString(minutes: number): string {
-    return this.getActionString(this.getAction(minutes));
-  }
-
   private getRate(state: CharacteristicValue | undefined | null): number {
     return state === this.State.HEAT ? 1 : (state === this.State.COOL ? -1 : 0);
   }
 
-  private getPower(state: CharacteristicValue | undefined | null): number | undefined {
-    return state === this.State.HEAT ? this.heatingPower
-      : (state === this.State.COOL ? (this.coolingPower === undefined ? undefined : -this.coolingPower) : 0);
+  private getPower(state: CharacteristicValue | undefined | null): number {
+    return state === this.State.HEAT ? this.heatingPower : (state === this.State.COOL ? -this.coolingPower : 0);
   }
 
-  private limitNumber(number: number, limit: number): number {
-    const max = (this.mode.value === this.Mode.HEAT) || (this.mode.value === this.Mode.AUTO) ? limit : 0;
-    const min = (this.mode.value === this.Mode.COOL) || (this.mode.value === this.Mode.AUTO) ? -limit : 0;
-    return Math.max(Math.min(number, max), min);
+  private limitPower(power: number): number {
+    const max = (this.mode.value === this.Mode.HEAT) || (this.mode.value === this.Mode.AUTO) ? this.heatingPower : 0;
+    const min = (this.mode.value === this.Mode.COOL) || (this.mode.value === this.Mode.AUTO) ? -this.coolingPower : 0;
+    return Math.max(Math.min(power, max), min);
   }
 
-  private limitBottom(number: number, limit = 0) {
-    return this.mode.value === this.Mode.OFF ? limit :
-      this.mode.value === this.Mode.HEAT ? Math.max(number, limit) :
-        this.mode.value === this.Mode.COOL ? Math.min(number, limit) :
-          number;
-  }
-
-  private formatMinutes(totalMinutes: number): string {
-    if (!isFinite(totalMinutes)) {
-      return totalMinutes.toString();
+  private formatSeconds(totalSeconds: number): string {
+    if (!isFinite(totalSeconds)) {
+      return totalSeconds.toString();
     }
-    const hours = Math.trunc(totalMinutes / 60);
-    const remainingMinutes = Math.abs(totalMinutes - hours * 60);
-    const minutes = Math.trunc(remainingMinutes);
-    const seconds = Math.trunc(60 * (remainingMinutes - minutes));
+    const hours = Math.trunc(totalSeconds / 3600);
+    let seconds = Math.abs(totalSeconds - hours * 3600);
+    const minutes = Math.trunc(seconds / 60);
+    seconds = Math.trunc(seconds - 60 * minutes);
     return (hours !== 0 ? hours + ':' +
            ('00' + minutes).slice(-2) + ':' : minutes + ':') +
            ('00' + seconds).slice(-2);
@@ -299,9 +289,9 @@ class AdvancedThermostat implements AccessoryPlugin {
     return `from ${format(oldValue)} to [${format(newValue)}]`;
   }
 
-  private logBasicData(oldState: CharacteristicValue, duration: number, logMessage?: string): void {
+  private logBasicData(oldState: CharacteristicValue, durationS: number, logMessage?: string): void {
     if (oldState !== this.state.value || logMessage) {
-      const suffix = 'for an ' + (isFinite(duration) ? `expected duration of ${this.formatMinutes(duration)}.` : 'unknown duration.');
+      const suffix = 'for an ' + (isFinite(durationS) ? `expected duration of ${this.formatSeconds(durationS)}.` : 'unknown duration.');
       if (oldState !== this.state.value && logMessage) {
         this.log.info(`${logMessage}, change state ${this.formatValueChange(oldState, this.state.value, this.getStateName.bind(this))} `
         + suffix);
@@ -326,20 +316,19 @@ class AdvancedThermostat implements AccessoryPlugin {
     }
   }
 
-  private logPidData(elapsed: number, budgetAddedD: number, duration: number): void {
+  private logPidData(elapsedS: number, budgetAddedDJ: number, durationS: number): void {
     const p = this.cP * (this.error ?? 0);
-    const i = this.bias;
-    const d = elapsed > 0 ? budgetAddedD / elapsed : 0;
+    const i = this.biasW;
+    const d = elapsedS > 0 ? budgetAddedDJ / elapsedS : 0;
     const pid = p + i + d;
     this.log.debug('PID: ' + pid.toFixed(2) + ' ' + '(P: ' + p.toFixed(3) + ', ' + 'I: ' + i.toFixed(3) + ', ' + 'D: ' + d.toFixed(3) + ') '
-                   + '=> Budget: ' + this.getMinutesActionString(this.budget) + ' '
-                   + '=> Duration: ' + this.formatMinutes(duration));
+                   + '=> Budget: ' + this.budgetJ + ' J '
+                   + '=> Duration: ' + this.formatSeconds(durationS));
     if (this.influxWriteApi && this.dataLogInfluxPid) {
       const dataPoint = new Point('thermostat-pid')
-        .floatField('pid', pid).floatField('pi', p + i).floatField('p', p).floatField('i', i).floatField('d', d)
         // In Watts:
-        .floatField('i-w', this.heatingPower === undefined ? undefined : (this.bias * this.heatingPower))
-        .floatField('p-w', this.heatingPower === undefined ? undefined : (p * this.heatingPower))
+        .floatField('i-w', i)
+        .floatField('p-w', p)
         .timestamp(this.updated);
       this.influxWriteApi.writePoint(dataPoint);
     }
@@ -348,31 +337,28 @@ class AdvancedThermostat implements AccessoryPlugin {
   private logBudgetData(): void {
     if (this.influxWriteApi && this.dataLogInfluxBudget) {
       const dataPoint = new Point('thermostat-budget')
-        .floatField('budget', this.budget)
-        // Budget is in minutes of heating, multiplying by power and 60s gives Joules.
-        // Ignoring cooling for now.
-        .floatField('budget-j', this.heatingPower === undefined ? undefined : (this.heatingPower * this.budget * 60))
+        .floatField('budget-j', this.budgetJ)
         .timestamp(this.updated);
       this.influxWriteApi.writePoint(dataPoint);
     }
   }
 
-  private logData(oldState: CharacteristicValue, elapsed: number, budgetAddedD: number, duration: number, logMessage?: string): void {
+  private logData(oldState: CharacteristicValue, elapsedS: number, budgetAddedDJ: number, durationS: number, logMessage?: string): void {
     this.logBudgetData();
-    this.logBasicData(oldState, duration, logMessage);
-    this.logPidData(elapsed, budgetAddedD, duration);
+    this.logBasicData(oldState, durationS, logMessage);
+    this.logPidData(elapsedS, budgetAddedDJ, durationS);
   }
 
   private computeDuration(): number {
     const epsilon = 0.00000001;
-    const rate = this.getRate(this.state.value);
+    const power = this.getPower(this.state.value);
     let limit = [0];
     if (this.state.value === this.State.OFF) {
       switch (this.mode.value) {
         case this.Mode.OFF: return Infinity;
-        case this.Mode.HEAT: limit = [this.budgetThreshold]; break;
-        case this.Mode.COOL: limit = [-this.budgetThreshold]; break;
-        case this.Mode.AUTO: limit = [-this.budgetThreshold, this.budgetThreshold];
+        case this.Mode.HEAT: limit = [this.budgetThresholdJ]; break;
+        case this.Mode.COOL: limit = [-this.budgetThresholdJ]; break;
+        case this.Mode.AUTO: limit = [-this.budgetThresholdJ, this.budgetThresholdJ];
       }
     }
     // Solve quadratic equation
@@ -381,8 +367,8 @@ class AdvancedThermostat implements AccessoryPlugin {
     // 0.5 * cI * e * t^2 + I0 * t + cP * e * t - r * t + b0 = l
     // 0.5*cI*e * t^2  +  (I0 + cP*e - r) * t  +  b0 - l = 0
     const a = 0.5 * this.cI * (this.error ?? 0);
-    const b = this.bias + this.cP * (this.error ?? 0) - rate;
-    const c = limit.map(l => this.budget - l);
+    const b = this.biasW + this.cP * (this.error ?? 0) - power;
+    const c = limit.map(l => this.budgetJ - l);
     if (Math.abs(a) > epsilon) {
       // t1,2 = (-b +/- sqrt(b^2 - 4ac)) / 2a
       const underSqrt = c.map(c => b**2 - 4 * a * c);
@@ -419,48 +405,48 @@ class AdvancedThermostat implements AccessoryPlugin {
 
     // Time
     const now = new Date();
-    const elapsedMinutes = this.updated ? (now.getTime() - this.updated.getTime()) / 60000 : undefined;
+    const elapsedSeconds = this.updated ? (now.getTime() - this.updated.getTime()) / 1000 : undefined;
 
     // Bias
-    const newBiasUnlimited = this.bias + this.cI * (this.error ?? 0) * (elapsedMinutes ?? 0);
-    const newBias = this.limitNumber(newBiasUnlimited, 1);
+    const newBiasWUnlimited = this.biasW + this.cI * (this.error ?? 0) * (elapsedSeconds ?? 0);
+    const newBiasW = this.limitPower(newBiasWUnlimited);
 
     // Compensation for limited heating cooling capacity:
     // Only the duration where the bias is not over/under limits is counted for P and I calculation.
-    let elapsedMinutesUnLimited = elapsedMinutes ?? 0;
-    if (newBias !== newBiasUnlimited) {
-      elapsedMinutesUnLimited = (newBias - this.bias) / (this.cI * (this.error ?? 0)); // CI * error is guaranteed != 0
+    let elapsedSecondsUnLimited = elapsedSeconds ?? 0;
+    if (newBiasW !== newBiasWUnlimited) {
+      elapsedSecondsUnLimited = (newBiasW - this.biasW) / (this.cI * (this.error ?? 0)); // CI * error is guaranteed != 0
     }
 
     // Update budget
-    this.budget -= (elapsedMinutes ?? 0) * this.getRate(this.state.value); // Used
-    const budgetAddedP = elapsedMinutesUnLimited * this.cP * (this.error ?? 0);
-    const budgetAddedI = elapsedMinutesUnLimited * (this.bias + newBias) / 2;
-    const budgetAddedD = (this.error !== undefined) ? this.cD * (error - this.error) : 0;
-    this.budget += budgetAddedP + budgetAddedI + budgetAddedD;
+    this.budgetJ -= (elapsedSeconds ?? 0) * this.getPower(this.state.value); // Used
+    const budgetAddedPJ = elapsedSecondsUnLimited * this.cP * (this.error ?? 0);
+    const budgetAddedIJ = elapsedSecondsUnLimited * (this.biasW + newBiasW) / 2;
+    const budgetAddedDJ = (this.error !== undefined) ? this.cD * (error - this.error) : 0;
+    this.budgetJ += budgetAddedPJ + budgetAddedIJ + budgetAddedDJ;
 
     // Determine next state
     const oldState = this.state.value ?? this.State.OFF;
     const nextState = shutdown ? this.State.OFF :
-      (this.canHeat() && (this.budget >= this.budgetThreshold)) ? this.State.HEAT :
-        (this.canCool() && (this.budget <= -this.budgetThreshold)) ? this.State.COOL :
-          oldState === this.State.HEAT && (this.budget <= 0 || !this.canHeat()) ? this.State.OFF :
-            oldState === this.State.COOL && (this.budget >= 0 || !this.canCool()) ? this.State.OFF :
+      (this.canHeat() && (this.budgetJ >= this.budgetThresholdJ)) ? this.State.HEAT :
+        (this.canCool() && (this.budgetJ <= -this.budgetThresholdJ)) ? this.State.COOL :
+          oldState === this.State.HEAT && (this.budgetJ <= 0 || !this.canHeat()) ? this.State.OFF :
+            oldState === this.State.COOL && (this.budgetJ >= 0 || !this.canCool()) ? this.State.OFF :
               oldState;
 
     // Update state
     this.state.updateValue(nextState);
     this.updated = now;
     this.error = error;
-    this.bias = newBias;
+    this.biasW = newBiasW;
 
     // Log
-    const duration = this.computeDuration();
-    this.logData(oldState, elapsedMinutes ?? 0, budgetAddedD, duration, logMessage);
+    const durationS = this.computeDuration();
+    this.logData(oldState, elapsedSeconds ?? 0, budgetAddedDJ, durationS, logMessage);
 
     // Set next iteration
     if (!shutdown) {
-      const durationMs = Math.min(Math.min(duration, this.minimumUpdateInterval) * 60000, 2147483647); // Limit to max possible value
+      const durationMs = Math.min(Math.min(durationS, this.minimumUpdateIntervalS) * 1000, 2147483647); // Limit to max possible value
       this.scheduledUpdate = setTimeout(this.update.bind(this), durationMs);
     }
   }
@@ -506,5 +492,7 @@ type AdvancedThermostatPersistedState = {
   temperature?: CharacteristicValue;
   error?: number;
   bias?: number;
+  biasW?: number;
   budget?: number;
+  budgetJ?: number;
 };
