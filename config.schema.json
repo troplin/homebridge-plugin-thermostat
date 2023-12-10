@@ -57,6 +57,13 @@
               "type": "number",
               "default": 700000,
               "required": true
+            },
+            "k": {
+              "title": "Overshoot Compensation",
+              "description": "Coefficient compensating for overshoot when changing target temperature. [W]",
+              "type": "number",
+              "default": 0,
+              "required": true
             }
           }
         },

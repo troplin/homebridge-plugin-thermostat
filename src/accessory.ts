@@ -68,6 +68,7 @@ class AdvancedThermostat implements AccessoryPlugin {
   private readonly cP: number;
   private readonly cI: number;
   private readonly cD: number;
+  private readonly k: number;
   private readonly budgetThresholdJ: number;
   private readonly minimumUpdateIntervalS: number;
 
@@ -105,6 +106,7 @@ class AdvancedThermostat implements AccessoryPlugin {
     this.cP = config.pid.cP;
     this.cI = config.pid.cI;
     this.cD = config.pid.cD;
+    this.k = config.pid.k ?? 0;
     this.budgetThresholdJ = config.modulation.budgetThreshold;
     this.minimumUpdateIntervalS = config.dataLog?.minimumUpdateInterval ?? Infinity;
     setLogger({
@@ -193,8 +195,8 @@ class AdvancedThermostat implements AccessoryPlugin {
     this.currentTemperature.updateValue(persistedState?.temperature ?? persistedState?.targetTemperature ?? 20);
     this.updated = persistedState?.updated ? new Date(persistedState?.updated) : undefined;
     this.error = persistedState?.error;
-    this.biasW = persistedState?.biasW ?? ((persistedState?.bias ?? 0) * this.heatingPower);
-    this.budgetJ = persistedState?.budgetJ ?? ((persistedState?.budget ?? 0) * this.heatingPower * 60);
+    this.biasW = persistedState?.biasW ?? 0;
+    this.budgetJ = persistedState?.budgetJ ?? 0;
     if (persistedState !== undefined) {
       this.log.debug('State loaded from: ' + this.persistPath);
     }
@@ -316,8 +318,8 @@ class AdvancedThermostat implements AccessoryPlugin {
     }
   }
 
-  private logPidData(elapsedS: number, budgetAddedDJ: number, durationS: number): void {
-    const p = this.cP * (this.error ?? 0);
+  private logPidData(elapsedS: number, budgetAddedDJ: number, durationS: number, compensationFactor: number): void {
+    const p = this.cP * (this.error ?? 0) * compensationFactor;
     const i = this.biasW;
     const d = elapsedS > 0 ? budgetAddedDJ / elapsedS : 0;
     const pid = p + i + d;
@@ -329,6 +331,7 @@ class AdvancedThermostat implements AccessoryPlugin {
         // In Watts:
         .floatField('i-w', i)
         .floatField('p-w', p)
+        .floatField('comp', compensationFactor)
         .timestamp(this.updated);
       this.influxWriteApi.writePoint(dataPoint);
     }
@@ -343,13 +346,14 @@ class AdvancedThermostat implements AccessoryPlugin {
     }
   }
 
-  private logData(oldState: CharacteristicValue, elapsedS: number, budgetAddedDJ: number, durationS: number, logMessage?: string): void {
+  private logData(oldState: CharacteristicValue, elapsedS: number, budgetAddedDJ: number, durationS: number, compensationFactor: number,
+    logMessage?: string): void {
     this.logBudgetData();
     this.logBasicData(oldState, durationS, logMessage);
-    this.logPidData(elapsedS, budgetAddedDJ, durationS);
+    this.logPidData(elapsedS, budgetAddedDJ, durationS, compensationFactor);
   }
 
-  private computeDuration(): number {
+  private computeDuration(compensationFactor: number): number {
     const epsilon = 0.00000001;
     const power = this.getPower(this.state.value);
     let limit = [0];
@@ -366,7 +370,7 @@ class AdvancedThermostat implements AccessoryPlugin {
     // ingetral_t(cI * e * t + I0) + cP * e * t - r * t + b0 = l
     // 0.5 * cI * e * t^2 + I0 * t + cP * e * t - r * t + b0 = l
     // 0.5*cI*e * t^2  +  (I0 + cP*e - r) * t  +  b0 - l = 0
-    const a = 0.5 * this.cI * (this.error ?? 0);
+    const a = 0.5 * (this.cI * compensationFactor) * (this.error ?? 0);
     const b = this.biasW + this.cP * (this.error ?? 0) - power;
     const c = limit.map(l => this.budgetJ - l);
     if (Math.abs(a) > epsilon) {
@@ -395,6 +399,11 @@ class AdvancedThermostat implements AccessoryPlugin {
     return this.mode.value === this.Mode.COOL || this.mode.value === this.Mode.AUTO;
   }
 
+  private getCompensationFactor(error: number, biasW: number): number {
+    const factor = 1 / (1 + this.k/(error >= 0 ? (this.heatingPower - biasW) : (biasW - this.coolingPower)));
+    return Number.isNaN(factor) ? 0 : factor;
+  }
+
   private update(logMessage?: string, shutdown = false) {
     clearTimeout(this.scheduledUpdate);
 
@@ -408,8 +417,11 @@ class AdvancedThermostat implements AccessoryPlugin {
     const elapsedSeconds = this.updated ? (now.getTime() - this.updated.getTime()) / 1000 : undefined;
 
     // Bias
-    const newBiasWUnlimited = this.biasW + this.cI * (this.error ?? 0) * (elapsedSeconds ?? 0);
+    const oldCompensationFactor = this.getCompensationFactor(this.error ?? 0, this.biasW);
+    const newBiasWUnlimited = this.biasW + this.cI * oldCompensationFactor * (this.error ?? 0) * (elapsedSeconds ?? 0);
     const newBiasW = this.limitPower(newBiasWUnlimited);
+    const newCompensationFactor = this.getCompensationFactor(error, newBiasW);
+    const avgCompensationFactor = 0.5 * (oldCompensationFactor + newCompensationFactor);
 
     // Compensation for limited heating cooling capacity:
     // Only the duration where the bias is not over/under limits is counted for P and I calculation.
@@ -420,7 +432,7 @@ class AdvancedThermostat implements AccessoryPlugin {
 
     // Update budget
     this.budgetJ -= (elapsedSeconds ?? 0) * this.getPower(this.state.value); // Used
-    const budgetAddedPJ = elapsedSecondsUnLimited * this.cP * (this.error ?? 0);
+    const budgetAddedPJ = elapsedSecondsUnLimited * this.cP * avgCompensationFactor * (this.error ?? 0);
     const budgetAddedIJ = elapsedSecondsUnLimited * (this.biasW + newBiasW) / 2;
     const budgetAddedDJ = (this.error !== undefined) ? this.cD * (error - this.error) : 0;
     this.budgetJ += budgetAddedPJ + budgetAddedIJ + budgetAddedDJ;
@@ -441,8 +453,8 @@ class AdvancedThermostat implements AccessoryPlugin {
     this.biasW = newBiasW;
 
     // Log
-    const durationS = this.computeDuration();
-    this.logData(oldState, elapsedSeconds ?? 0, budgetAddedDJ, durationS, logMessage);
+    const durationS = this.computeDuration(newCompensationFactor);
+    this.logData(oldState, elapsedSeconds ?? 0, budgetAddedDJ, durationS, newCompensationFactor, logMessage);
 
     // Set next iteration
     if (!shutdown) {
@@ -491,8 +503,6 @@ type AdvancedThermostatPersistedState = {
   targetTemperature?: CharacteristicValue;
   temperature?: CharacteristicValue;
   error?: number;
-  bias?: number;
   biasW?: number;
-  budget?: number;
   budgetJ?: number;
 };
