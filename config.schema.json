@@ -60,10 +60,16 @@
             },
             "k": {
               "title": "Overshoot Compensation",
-              "description": "Coefficient compensating for overshoot when changing target temperature. [W]",
+              "description": "Coefficient compensating for overshoot when changing target temperature. [W / °C]",
               "type": "number",
               "default": 0,
               "required": true
+            },
+            "dt": {
+              "title": "Expected Temperature Step",
+              "description": "The maximum expected step in target temperature [°C]. Leave empty for adaptive algorithm.",
+              "type": "number",
+              "required": false
             }
           }
         },

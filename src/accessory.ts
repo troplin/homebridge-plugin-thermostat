@@ -69,6 +69,7 @@ class AdvancedThermostat implements AccessoryPlugin {
   private readonly cI: number;
   private readonly cD: number;
   private readonly k: number;
+  private readonly dt?: number;
   private readonly budgetThresholdJ: number;
   private readonly minimumUpdateIntervalS: number;
 
@@ -107,6 +108,7 @@ class AdvancedThermostat implements AccessoryPlugin {
     this.cI = config.pid.cI;
     this.cD = config.pid.cD;
     this.k = config.pid.k ?? 0;
+    this.dt = config.pid.dt;
     this.budgetThresholdJ = config.modulation.budgetThreshold;
     this.minimumUpdateIntervalS = config.dataLog?.minimumUpdateInterval ?? Infinity;
     setLogger({
@@ -400,7 +402,9 @@ class AdvancedThermostat implements AccessoryPlugin {
   }
 
   private getCompensationFactor(error: number, biasW: number): number {
-    const factor = 1 / (1 + this.k/(error >= 0 ? (this.heatingPower - biasW) : (biasW - this.coolingPower)));
+    const headroom = error >= 0 ? (this.heatingPower - biasW) : (biasW - this.coolingPower);
+    const dt = this.dt ?? Math.abs(error);
+    const factor = 1 / (1 + this.k * dt /headroom);
     return Number.isNaN(factor) ? 0 : factor;
   }
 
