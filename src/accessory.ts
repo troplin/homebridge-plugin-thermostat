@@ -320,12 +320,10 @@ class AdvancedThermostat implements AccessoryPlugin {
     }
   }
 
-  private logPidData(elapsedS: number, budgetAddedDJ: number, durationS: number, compensationFactor: number): void {
+  private logPidData(durationS: number, compensationFactor: number): void {
     const p = this.cP * (this.error ?? 0) * compensationFactor;
     const i = this.biasW;
-    const d = elapsedS > 0 ? budgetAddedDJ / elapsedS : 0;
-    const pid = p + i + d;
-    this.log.debug('PID: ' + pid.toFixed(2) + ' ' + '(P: ' + p.toFixed(3) + ', ' + 'I: ' + i.toFixed(3) + ', ' + 'D: ' + d.toFixed(3) + ') '
+    this.log.debug('P: ' + p.toFixed(3) + ', ' + 'I: ' + i.toFixed(3)+ ' '
                    + '=> Budget: ' + this.budgetJ + ' J '
                    + '=> Duration: ' + this.formatSeconds(durationS));
     if (this.influxWriteApi && this.dataLogInfluxPid) {
@@ -348,11 +346,11 @@ class AdvancedThermostat implements AccessoryPlugin {
     }
   }
 
-  private logData(oldState: CharacteristicValue, elapsedS: number, budgetAddedDJ: number, durationS: number, compensationFactor: number,
+  private logData(oldState: CharacteristicValue, durationS: number, compensationFactor: number,
     logMessage?: string): void {
     this.logBudgetData();
     this.logBasicData(oldState, durationS, logMessage);
-    this.logPidData(elapsedS, budgetAddedDJ, durationS, compensationFactor);
+    this.logPidData(durationS, compensationFactor);
   }
 
   private computeDuration(compensationFactor: number): number {
@@ -402,10 +400,15 @@ class AdvancedThermostat implements AccessoryPlugin {
   }
 
   private getCompensationFactor(error: number, biasW: number): number {
-    const headroom = error >= 0 ? (this.heatingPower - biasW) : (biasW - this.coolingPower);
+    const headroom = error >= 0 ? (this.heatingPower - biasW) : (biasW + this.coolingPower);
     const dt = this.dt ?? Math.abs(error);
     const factor = 1 / (1 + this.k * dt /headroom);
     return Number.isNaN(factor) ? 0 : factor;
+  }
+
+  private getDifferentialIntegral(biasW: number, error: number) {
+    const headroom = (error > 0 ? this.heatingPower : -this.coolingPower) - biasW;
+    return this.cD * headroom * Math.log(1 + this.k * error / headroom) / this.k;
   }
 
   private update(logMessage?: string, shutdown = false) {
@@ -435,12 +438,16 @@ class AdvancedThermostat implements AccessoryPlugin {
       elapsedSecondsUnLimited = (newBiasW - this.biasW) / (this.cI * oldCompensationFactor * (this.error ?? 0));
     }
 
-    // Update budget
-    this.budgetJ -= (elapsedSeconds ?? 0) * this.getPower(this.state.value); // Used
-    const budgetAddedPJ = elapsedSecondsUnLimited * this.cP * avgCompensationFactor * (this.error ?? 0);
-    const budgetAddedIJ = elapsedSecondsUnLimited * (this.biasW + newBiasW) / 2;
-    const budgetAddedDJ = (this.error !== undefined) ? this.cD * (error - this.error) : 0;
-    this.budgetJ += budgetAddedPJ + budgetAddedIJ + budgetAddedDJ;
+    // Subtract budget used during last period
+    this.budgetJ -= (elapsedSeconds ?? 0) * this.getPower(this.state.value);
+    // Add proportional budget comoponent
+    this.budgetJ += elapsedSecondsUnLimited * this.cP * avgCompensationFactor * (this.error ?? 0);
+    // Add integral budget comoponent
+    this.budgetJ += elapsedSecondsUnLimited * (this.biasW + newBiasW) / 2;
+    // Add differential budget comoponent
+    if (this.error !== undefined && this.error !== null) {
+      this.budgetJ += this.getDifferentialIntegral(newBiasW, error) - this.getDifferentialIntegral(newBiasW, this.error);
+    }
 
     // Determine next state
     const oldState = this.state.value ?? this.State.OFF;
@@ -459,7 +466,7 @@ class AdvancedThermostat implements AccessoryPlugin {
 
     // Log
     const durationS = this.computeDuration(newCompensationFactor);
-    this.logData(oldState, elapsedSeconds ?? 0, budgetAddedDJ, durationS, newCompensationFactor, logMessage);
+    this.logData(oldState, durationS, newCompensationFactor, logMessage);
 
     // Set next iteration
     if (!shutdown) {
