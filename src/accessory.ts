@@ -400,15 +400,15 @@ class AdvancedThermostat implements AccessoryPlugin {
   }
 
   private getCompensationFactor(error: number, biasW: number): number {
-    const headroom = error >= 0 ? (this.heatingPower - biasW) : (biasW + this.coolingPower);
-    const dt = this.dt ?? Math.abs(error);
-    const factor = 1 / (1 + this.k * dt /headroom);
-    return Number.isNaN(factor) ? 0 : factor;
-  }
-
-  private getDifferentialIntegral(biasW: number, error: number) {
     const headroom = (error > 0 ? this.heatingPower : -this.coolingPower) - biasW;
-    return this.cD * headroom * Math.log(1 + this.k * error / headroom) / this.k;
+    const cFactor = headroom / (this.k * error);
+    if (Number.isFinite(cFactor)) {
+      return cFactor * (1 - Math.exp(-1/cFactor));
+    }else if (Number.isNaN(cFactor)) {
+      return 0;
+    } else {
+      return 1;
+    }
   }
 
   private update(logMessage?: string, shutdown = false) {
@@ -425,10 +425,11 @@ class AdvancedThermostat implements AccessoryPlugin {
 
     // Bias
     const oldCompensationFactor = this.getCompensationFactor(this.error ?? 0, this.biasW);
-    const newBiasWUnlimited = this.biasW + this.cI * oldCompensationFactor * (this.error ?? 0) * (elapsedSeconds ?? 0);
+    const oldCompensatedError = oldCompensationFactor * (this.error ?? 0);
+    const newBiasWUnlimited = this.biasW + this.cI * oldCompensatedError * (elapsedSeconds ?? 0);
     const newBiasW = this.limitPower(newBiasWUnlimited);
     const newCompensationFactor = this.getCompensationFactor(error, newBiasW);
-    const avgCompensationFactor = 0.5 * (oldCompensationFactor + newCompensationFactor);
+    const newCompensatedError = newCompensationFactor * error;
 
     // Compensation for limited heating cooling capacity:
     // Only the duration where the bias is not over/under limits is counted for P and I calculation.
@@ -441,12 +442,12 @@ class AdvancedThermostat implements AccessoryPlugin {
     // Subtract budget used during last period
     this.budgetJ -= (elapsedSeconds ?? 0) * this.getPower(this.state.value);
     // Add proportional budget comoponent
-    this.budgetJ += elapsedSecondsUnLimited * this.cP * avgCompensationFactor * (this.error ?? 0);
+    this.budgetJ += elapsedSecondsUnLimited * this.cP * (oldCompensatedError + newCompensatedError) / 2;
     // Add integral budget comoponent
     this.budgetJ += elapsedSecondsUnLimited * (this.biasW + newBiasW) / 2;
     // Add differential budget comoponent
     if (this.error !== undefined && this.error !== null) {
-      this.budgetJ += this.getDifferentialIntegral(newBiasW, error) - this.getDifferentialIntegral(newBiasW, this.error);
+      this.budgetJ += this.cD * (newCompensatedError - oldCompensatedError);
     }
 
     // Determine next state
